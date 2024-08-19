@@ -6,8 +6,7 @@ import time
 
 import requests
 from PIL import Image
-
-ROBOT_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=395ae222-24cd-4f07-bb76-4303dd959823"
+from quant_utils.constant import ROBOT_URL
 
 
 def get_picture_base64_data(image_path, fmt="PNG"):
@@ -15,8 +14,7 @@ def get_picture_base64_data(image_path, fmt="PNG"):
     output = io.BytesIO()
     img.save(output, format=fmt)
     byte_data = output.getvalue()
-    base64_str = base64.b64encode(byte_data).decode("utf-8")
-    return base64_str
+    return base64.b64encode(byte_data).decode("utf-8")
 
 
 def get_picture_md5(image_path, fmt="PNG"):

@@ -20,8 +20,10 @@ LOG_CONFIG_PATH = "D:/config/log_config.json"
 DB_CONFIG_PATH = "D:/config/db_config.json"
 EMAIL_CONFIG_PATH = "D:/config/email_config.json"
 BARRA_NAME_PATH = "D:/config/barra_name.json"
+WX_CONFIG_PATH = "D:/config/wx_config.json"
 
 EMAIL_CONFIG = load_json(EMAIL_CONFIG_PATH)
 DB_CONFIG = load_json(DB_CONFIG_PATH)
 BARRA_SW21_FACTOR_NAME_DICT = load_json(BARRA_NAME_PATH)
 LOG_FILE_PATH = load_json(LOG_CONFIG_PATH)["path"] + f"{TODAY}.log"
+ROBOT_URL = load_json(WX_CONFIG_PATH)["url"]
