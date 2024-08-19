@@ -57,8 +57,8 @@ def query_from_remote_upsert_into_local(
     # 查询数据
     df = query_db_conn.exec_query(query_sql)
     print(f"{table}查询结束!")
-    drop_cloumns = ["OBJECT_ID", "SEC_ID", "OPMODE", "S_INFO_CODE", "JSID"]
     if if_drop_columns:
+        drop_cloumns = ["OBJECT_ID", "SEC_ID", "OPMODE", "S_INFO_CODE", "JSID"]
         if columns_needed_to_drop := list(set(df.columns) & set(drop_cloumns)):
             df.drop(columns=columns_needed_to_drop, inplace=True)
 

@@ -142,11 +142,10 @@ class WxWrapper:
             response_json = response.json()
             if response_json.get("errcode") == 0:
                 return response_json["media_id"]
-            else:
-                print(
-                    f"文件上传失败，错误码：{response_json['errcode']}, 错误信息：{response_json['errmsg']}"
-                )
-                return None
+            print(
+                f"文件上传失败，错误码：{response_json['errcode']}, 错误信息：{response_json['errmsg']}"
+            )
+            return None
 
     def send_file(
         self,

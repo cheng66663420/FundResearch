@@ -85,7 +85,7 @@ class DocxWrapper:
         for key in kwargs:
             if key not in default_font_dict:
                 raise ValueError(f"Invalid font key: {key}")
-        default_font_dict.update(kwargs)
+        default_font_dict |= kwargs
         paragraph.paragraph_format.space_before = Pt(default_font_dict["before_space"])
         paragraph.paragraph_format.space_after = Pt(default_font_dict["after_space"])
         paragraph.paragraph_format.line_spacing = default_font_dict["line_space"]
@@ -232,8 +232,7 @@ class DocxWrapper:
             df1.columns = df.columns
             df = pd.concat([df1, df]).reset_index(drop=True)
         data_array = df.values
-        table = self.add_table(data_array)
-        return table
+        return self.add_table(data_array)
 
     def _set_table_style(self, table: Table):
 
@@ -264,8 +263,7 @@ class DocxWrapper:
         """
         borders = OxmlElement("w:tblBorders")
         for tag in ("bottom", "top", "left", "right", "insideV", "insideH"):
-            edge_data = kwargs.get(tag)
-            if edge_data:
+            if edge_data := kwargs.get(tag):
                 any_border = OxmlElement(f"w:{tag}")
                 for key in ["sz", "val", "color", "space", "shadow"]:
                     if key in edge_data:

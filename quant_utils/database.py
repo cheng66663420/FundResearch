@@ -37,7 +37,7 @@ class MySQL:
         self.pwd = quote(pwd)
         self.database = quote(database)
         self.charset = charset
-        self.port = int(port)
+        self.port = port
         self.engine = self._create_engine()
 
     def _create_engine(self):
@@ -118,8 +118,8 @@ class MySQL:
             placeholders = ", ".join([f":{col}" for col in df.columns])
             updates = ", ".join([f"{col} = values({col})" for col in df.columns])
             return f"""
-            INSERT INTO {table} ({columns}) 
-            VALUES ({placeholders}) 
+            INSERT INTO {table} ({columns})
+            VALUES ({placeholders})
             ON DUPLICATE KEY UPDATE {updates}
             """
 
@@ -166,8 +166,7 @@ class Postgres:
         """
         with self.engine.connect() as connection:
             result = connection.execute(text(query), params)
-            df = pd.DataFrame(result.fetchall(), columns=result.keys())
-            return df  # 返回所有结果
+            return pd.DataFrame(result.fetchall(), columns=result.keys())
 
     def exec_nonquery(self, query, params=None):
         """

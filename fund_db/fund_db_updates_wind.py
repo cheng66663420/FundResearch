@@ -144,7 +144,7 @@ def update_fund_type(update_date: str = None):
         query_sql = f"""
         SELECT LEFT
             ( INDUSTRIESCODE, {8+(level-1)*2} ) AS CODE_{level},
-            INDUSTRIESNAME AS INDUSTRIESNAME_{level} 
+            INDUSTRIESNAME AS INDUSTRIESNAME_{level}
         FROM
             ashareindustriescode 
         WHERE
@@ -341,9 +341,9 @@ def update_aindex_eod_prices(update_date: str = None):
             SUBSTRING_INDEX( S_INFO_WINDCODE, '.', 1 ) AS TICKER_SYMBOL,
             ROUND( LOG( S_DQ_PCTCHANGE / 100+1 )* 100, 4 ) AS LOG_RET
         FROM
-            aindexwindindustrieseod 
+            aindexwindindustrieseod
         WHERE
-            TRADE_DT >= '{update_date}' 
+            TRADE_DT >= '{update_date}'
     """
     df = DB_CONN_WIND.exec_query(query_sql)
     df.rename(columns={"OPDATE": "UPDATE_TIME"}, inplace=True)
