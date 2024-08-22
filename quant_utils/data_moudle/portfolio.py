@@ -405,6 +405,72 @@ def get_portfolio_daily_limit() -> pd.DataFrame:
     return DB_CONN_JJTG_DATA.exec_query(query_sql)
 
 
+def get_portfolio_income() -> pd.DataFrame:
+    """
+    获取组合创收
+
+    Returns
+    -------
+    pd.DataFrame
+        组合创收
+    """
+    query_sql = """
+    WITH a AS ( SELECT min( MANAGEMENT_FEE_INDIVIDUAL ) AS MIN_MANAGEMENT_FEE_INDIVIDUAL, min( MANAGEMENT_FEE_INSTITUTION ) AS MIN_MANAGEMENT_FEE_INSTITUTION FROM portfolio_basic_products WHERE 1=1 and IF_IN_TRANCHE=1),
+    b AS (
+    SELECT
+        holding.portfolio_name,
+        holding.ticker_symbol,
+        holding.SEC_SHORT_NAME,
+        holding.WEIGHT * ( product.MANAGEMENT_FEE_INDIVIDUAL - a.MIN_MANAGEMENT_FEE_INDIVIDUAL ) * product.MANAGEMENT_FEE / 10000 AS `管理费分成抵扣_个人`,
+        holding.WEIGHT * ( product.MANAGEMENT_FEE_INSTITUTION - a.MIN_MANAGEMENT_FEE_INSTITUTION ) * product.MANAGEMENT_FEE / 10000 AS `管理费分成抵扣_机构`,
+        holding.WEIGHT * MIN_MANAGEMENT_FEE_INDIVIDUAL * MANAGEMENT_FEE / 10000 AS `个人产品管理费分成`,
+        holding.WEIGHT * MIN_MANAGEMENT_FEE_INSTITUTION * MANAGEMENT_FEE / 10000 AS `机构产品管理费分成`,
+        holding.WEIGHT * product.SALE_FEE / 100 AS `销售服务费` 
+    FROM
+        view_portfolio_holding_new holding
+        JOIN portfolio_basic_products product ON holding.ticker_symbol = product.ticker_symbol
+        JOIN portfolio_info info ON info.PORTFOLIO_NAME = holding.PORTFOLIO_NAME
+        JOIN a 
+    ),
+    c AS (
+    SELECT
+        b.portfolio_name,
+        round( sum( `管理费分成抵扣_个人` ), 4 ) AS `抵扣_个人`,
+        round( sum( `管理费分成抵扣_机构` ), 4 ) AS `抵扣_机构`,
+        round( sum( `个人产品管理费分成` ), 4 ) AS `管理费分成收入_个人`,
+        round( sum( `机构产品管理费分成` ), 4 ) AS `管理费分成收入_机构`,
+        round( sum( b.`销售服务费` ), 4 ) AS `销售服务费` 
+    FROM
+        b 
+    GROUP BY
+        b.portfolio_name 
+    ) SELECT
+    c.portfolio_name AS '组合名称',
+    d.PORTFOLIO_MANAGEMENT_FEE AS `投顾管理费`,
+    a.MIN_MANAGEMENT_FEE_INDIVIDUAL AS '最低管理费分成_个人',
+    a.MIN_MANAGEMENT_FEE_INSTITUTION AS '最低管理费分成_机构',
+    c.`管理费分成收入_个人`,
+    c.`管理费分成收入_机构`,
+    c.`销售服务费`,
+    d.PORTFOLIO_MANAGEMENT_FEE + `管理费分成收入_个人` + `销售服务费` AS `总创收_个人`,
+    d.PORTFOLIO_MANAGEMENT_FEE + `管理费分成收入_机构` + `销售服务费` AS `总创收_机构`,
+    c.`抵扣_个人`,
+    c.`抵扣_机构`,
+    d.PORTFOLIO_MANAGEMENT_FEE - `抵扣_个人` AS `实际成本_个人`,
+    d.PORTFOLIO_MANAGEMENT_FEE - `抵扣_机构` AS `实际成本_机构` 
+    FROM
+    c
+    JOIN portfolio_info d ON c.PORTFOLIO_NAME = d.PORTFOLIO_NAME
+    JOIN a 
+    WHERE
+    1 = 1 
+    AND d.IF_LISTED = 1 
+    ORDER BY
+    d.ORDER_ID
+    """
+    return DB_CONN_JJTG_DATA.exec_query(query_sql)
+
+
 __all__ = [
     "get_portfolio_derivatives_ret",
     "get_peer_fund",
@@ -416,6 +482,7 @@ __all__ = [
     "get_listed_portfolio_derivatives_ret",
     "get_portfolio_derivatives_perfomance",
     "get_portfolio_daily_limit",
+    "get_portfolio_income",
 ]
 if __name__ == "__main__":
     print(
