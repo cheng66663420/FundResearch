@@ -107,7 +107,6 @@ def rpa_daily_performance(trade_date: str = None):
     ) as excel_handler:
         # 更新日期
         excel_handler.select_sheet("日期")
-        excel_handler.select_sheet("日期")
         df = excel_handler.get_data("A1", convert=pd.DataFrame, expand="table")
         dates = update_dates(trade_date=trade_date, df=df)
         excel_handler.write_dataframe(dates, if_write_header=True, if_write_index=True)
@@ -199,20 +198,26 @@ def rpa_daily_target_portfolio_performance():
 
 
 if __name__ == "__main__":
-    rpa_daily_performance(LAST_TRADE_DT)
-    rpa_daily_target_portfolio_performance()
-    wx_robot = WxWrapper()
-    mention_moble_list = wx_robot.get_mentioned_moble_list_by_name(
-        ["陈娇君", "陆天琦", "陈恺寅"]
-    )
-    wx_robot.send_image(
-        image_path="E:/基金投顾自动化/结果/目标盈日度监控.png",
-    )
-    wx_robot.send_image(
-        image_path="E:/基金投顾自动化/结果/策略业绩日报v7.png",
-    )
+    for _ in range(10):
+        try:
+            rpa_daily_performance(LAST_TRADE_DT)
+            rpa_daily_target_portfolio_performance()
+            wx_robot = WxWrapper()
+            mention_moble_list = wx_robot.get_mentioned_moble_list_by_name(
+                ["陈娇君", "陆天琦", "陈恺寅"]
+            )
+            wx_robot.send_image(
+                image_path="E:/基金投顾自动化/结果/目标盈日度监控.png",
+            )
+            wx_robot.send_image(
+                image_path="E:/基金投顾自动化/结果/策略业绩日报v7.png",
+            )
 
-    wx_robot.send_text(
-        content=f"{emoji.emojize('❣')}今日基金投顾业绩播报与目标盈播报已送达,请注意查收{emoji.emojize('❣')}",
-        mentioned_mobile_list=mention_moble_list,
-    )
+            wx_robot.send_text(
+                content=f"{emoji.emojize('❣')}今日基金投顾业绩播报与目标盈播报已送达,请注意查收{emoji.emojize('❣')}",
+                mentioned_mobile_list=mention_moble_list,
+            )
+            break
+        except Exception as e:
+            print(e)
+            kill_processes_containing("WPS")

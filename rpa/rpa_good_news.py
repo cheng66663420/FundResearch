@@ -115,7 +115,6 @@ class GoodNewsSender:
         im.save(name)
 
     def draw(self):
-
         for idx, val in self.big_data.iterrows():
             self.creat_image(
                 idx=idx,
@@ -128,16 +127,21 @@ class GoodNewsSender:
 
     def send_good_news(self):
         self.draw()
-        image_file_list = self.get_image_file_list(
-            f"{self.template_path}结果/喜报/{self.trade_time}"
-        )
+        if not os.path.exists(f"{self.template_path}结果/喜报/{self.trade_time}"):
+            image_file_list = []
+        else:
+            image_file_list = self.get_image_file_list(
+                f"{self.template_path}结果/喜报/{self.trade_time}"
+            )
 
-        if len(image_file_list) == 0:
+        if image_file_list:
+            # 发送今天的喜报
+            for image_file in image_file_list:
+                self.wx.send_image(image_file)
+        else:
             print("没有找到图片")
-            return None
-        # 发送今天的喜报
-        for image_file in image_file_list:
-            self.wx.send_image(image_file)
+            self.wx.send_text(content="今日无喜报")
+
         at_person_df = pd.read_excel(
             self.template_path + "艾特名单.xlsx", engine="openpyxl"
         )
@@ -161,11 +165,10 @@ class GoodNewsSender:
             content=f"{emoji.emojize('❣')}陆老板,您的喜报来了,请给好评哦!{emoji.emojize('❣')}",
             mentioned_mobile_list=mention_mobile_list,
         )
-        sum_list = []
         sum_amount = self.data["委托金额"].sum()
-        sum_list.append(
+        sum_list = [
             f"{emoji.emojize('🚀')}基金基金投顾完成销量{sum_amount:.2f}万元,感谢支持!"
-        )
+        ]
         df = self.data.groupby(by="组合名称")["委托金额"].sum().reset_index()
         df.sort_values(by="委托金额", ascending=False, inplace=True)
         for _, val in df.iterrows():
@@ -178,5 +181,5 @@ class GoodNewsSender:
 
 
 if __name__ == "__main__":
-    good_news = GoodNewsSender(black_list=[])
+    good_news = GoodNewsSender(min_amount=5, black_list=[])
     good_news.send_good_news()
