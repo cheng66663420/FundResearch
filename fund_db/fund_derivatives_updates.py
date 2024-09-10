@@ -217,10 +217,10 @@ def update_fund_duration(report_date: str):
 for year in range(2000, 2025):
     for month in ["0331", "0630", "0930", "1231"]:
         report_date = str(year) + month
-        # update_fund_derivatives_stock_holdings(report_date=report_date, if_10=1)
-        # update_fund_derivatives_crowd(report_date=report_date, if_10=1)
-        # update_fund_derivatives_stock_holdings(report_date=report_date, if_10=0)
-        # update_fund_derivatives_crowd(report_date=report_date, if_10=0)
+        update_fund_derivatives_stock_holdings(report_date=report_date, if_10=1)
+        update_fund_derivatives_crowd(report_date=report_date, if_10=1)
+        update_fund_derivatives_stock_holdings(report_date=report_date, if_10=0)
+        update_fund_derivatives_crowd(report_date=report_date, if_10=0)
         update_fund_duration(report_date=report_date)
     # for month in ["0630", "1231"]:
     #     report_date = str(year) + month
