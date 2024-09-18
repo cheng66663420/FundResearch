@@ -37,6 +37,17 @@ class GoodNewsSender:
         data["委托时间"] = pd.to_datetime(data["委托时间"]).dt.strftime("%Y%m%d")
         data["委托金额"] = data["委托金额"] / 10000
         data = data[data["委托时间"] == self.trade_time]
+        data = data[
+            data["交易类型"].isin(
+                [
+                    "首次签约",
+                    "追加投资",
+                    "定投",
+                    "预约购买",
+                    "份额追加投资",
+                ]
+            )
+        ]
         # data = data.query(f"委托金额 >= {self.min_amount}")
         data = (
             data.groupby(by=["分公司", "委托时间", "客户编号", "组合名称"])["委托金额"]
