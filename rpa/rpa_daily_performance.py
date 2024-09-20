@@ -212,7 +212,9 @@ if __name__ == "__main__":
             wx_robot.send_image(
                 image_path="E:/基金投顾自动化/结果/策略业绩日报v7.png",
             )
-
+            wx_robot.send_text(
+                content=f"#每日播报 仅供各位领导同事内部参考，请勿对客转发{emoji.emojize('❣')}",
+            )
             wx_robot.send_text(
                 content=f"{emoji.emojize('❣')}今日基金投顾业绩播报与目标盈播报已送达,请注意查收{emoji.emojize('❣')}",
                 mentioned_mobile_list=mention_moble_list,
