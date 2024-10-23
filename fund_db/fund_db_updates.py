@@ -425,23 +425,25 @@ def update_fund_derivatives_enhanced_index_alpha(update_date: str = None):
     if update_date is None:
         update_date = LAST_TRADE_DT
     query_sql = f"""
-    WITH a AS (
+        WITH c AS ( SELECT TICKER_SYMBOL, IDX_SHORT_NAME, BEGIN_DATE, END_DATE, IS_EXE, IDX_SYMBOL FROM fund_tracking_idx UNION SELECT TICKER_SYMBOL, IDX_SHORT_NAME, BEGIN_DATE, END_DATE, IS_EXE, IDX_SYMBOL FROM fund_tracking_idx_own ),
+        a AS (
         SELECT
             a.END_DATE,
             a.TICKER_SYMBOL,
             b.SEC_SHORT_NAME,
             c.IDX_SHORT_NAME,
             a.LOG_RET AS FUND_LOG_RET,
-            (log(1+ChangePCT/100)*100) AS IDX_LOG_RET,
-            a.LOG_RET - (log(1+ChangePCT/100)*100) AS LOG_ALPHA 
+            ( log( 1+ChangePCT / 100 ) * 100 ) AS IDX_LOG_RET,
+            a.LOG_RET - ( log( 1+ChangePCT / 100 ) * 100 ) AS LOG_ALPHA 
         FROM
             fund_adj_nav a
             JOIN fund_type_own b ON b.TICKER_SYMBOL = a.TICKER_SYMBOL
-            JOIN fund_tracking_idx c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
+            JOIN c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
             JOIN jy_indexquote d ON d.SecuCode = c.IDX_SYMBOL 
             AND d.TradingDay = a.END_DATE 
         WHERE
-            b.LEVEL_2 = '指数增强' 
+            1 = 1 
+            and b.level_2 not in ("ETF", "ETF联接", "权益指数基金")
             AND a.END_DATE = DATE ( "{update_date}" ) 
             AND c.BEGIN_DATE <= DATE ( "{update_date}" ) AND ifnull( c.END_DATE, '2099-12-31' ) > DATE ( "{update_date}" ) 
         AND b.REPORT_DATE = ( SELECT max( REPORT_DATE ) FROM fund_type_own WHERE PUBLISH_DATE <= DATE ( "{update_date}" ) )) SELECT
@@ -461,48 +463,48 @@ def update_fund_derivatives_enhanced_index_alpha(update_date: str = None):
         query_db_conn=DB_CONN_JJTG_DATA,
     )
 
-    query_sql = f"""
-        with a as (SELECT
-            a.END_DATE,
-            a.TICKER_SYMBOL,
-            b.SEC_SHORT_NAME,
-            c.IDX_SHORT_NAME,
-            a.LOG_RET AS FUND_LOG_RET,
-            (log(1+ChangePCT/100)*100) AS IDX_LOG_RET,
-            a.LOG_RET - (log(1+ChangePCT/100)*100) AS LOG_ALPHA 
-        FROM
-            fund_adj_nav a
-            JOIN fund_type_own b ON b.TICKER_SYMBOL = a.TICKER_SYMBOL
-            JOIN fund_tracking_idx c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
-            JOIN jy_indexquote d ON d.SecuCode = c.IDX_SYMBOL 
-            AND d.TradingDay = a.END_DATE 
-        WHERE
-            1 = 1 
-            AND a.END_DATE = "{update_date}" 
-            AND c.BEGIN_DATE <= "{update_date}" AND ifnull( c.END_DATE, '2099-12-31' ) > "{update_date}" 
-            AND b.REPORT_DATE = (
-            SELECT
-                max( REPORT_DATE ) 
-            FROM
-                fund_type_own 
-            WHERE
-            PUBLISH_DATE <= "{update_date}")
-        )SELECT
-            a.*,
-            a.LOG_ALPHA + ifnull( c.CUM_LOG_ALPHA, 0 ) AS CUM_LOG_ALPHA,
-            exp(( a.LOG_ALPHA + ifnull( c.CUM_LOG_ALPHA, 0 ))/ 100 ) AS CUM_ALPHA_NAV 
-        FROM
-            a
-            LEFT JOIN md_tradingdaynew b ON a.END_DATE = b.TRADE_DT 
-            AND b.SECU_MARKET = 83
-            LEFT JOIN fund_derivatives_enhanced_index_alpha c ON c.END_DATE = b.PREV_TRADE_DATE 
-            AND c.TICKER_SYMBOL = a.TICKER_SYMBOL
-        """
-    query_from_remote_upsert_into_local(
-        query_sql,
-        table="fund_derivatives_enhanced_index_alpha",
-        query_db_conn=DB_CONN_JJTG_DATA,
-    )
+    # query_sql = f"""
+    #     with a as (SELECT
+    #         a.END_DATE,
+    #         a.TICKER_SYMBOL,
+    #         b.SEC_SHORT_NAME,
+    #         c.IDX_SHORT_NAME,
+    #         a.LOG_RET AS FUND_LOG_RET,
+    #         (log(1+ChangePCT/100)*100) AS IDX_LOG_RET,
+    #         a.LOG_RET - (log(1+ChangePCT/100)*100) AS LOG_ALPHA
+    #     FROM
+    #         fund_adj_nav a
+    #         JOIN fund_type_own b ON b.TICKER_SYMBOL = a.TICKER_SYMBOL
+    #         JOIN fund_tracking_idx c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
+    #         JOIN jy_indexquote d ON d.SecuCode = c.IDX_SYMBOL
+    #         AND d.TradingDay = a.END_DATE
+    #     WHERE
+    #         1 = 1
+    #         AND a.END_DATE = "{update_date}"
+    #         AND c.BEGIN_DATE <= "{update_date}" AND ifnull( c.END_DATE, '2099-12-31' ) > "{update_date}"
+    #         AND b.REPORT_DATE = (
+    #         SELECT
+    #             max( REPORT_DATE )
+    #         FROM
+    #             fund_type_own
+    #         WHERE
+    #         PUBLISH_DATE <= "{update_date}")
+    #     )SELECT
+    #         a.*,
+    #         a.LOG_ALPHA + ifnull( c.CUM_LOG_ALPHA, 0 ) AS CUM_LOG_ALPHA,
+    #         exp(( a.LOG_ALPHA + ifnull( c.CUM_LOG_ALPHA, 0 ))/ 100 ) AS CUM_ALPHA_NAV
+    #     FROM
+    #         a
+    #         LEFT JOIN md_tradingdaynew b ON a.END_DATE = b.TRADE_DT
+    #         AND b.SECU_MARKET = 83
+    #         LEFT JOIN fund_derivatives_enhanced_index_alpha c ON c.END_DATE = b.PREV_TRADE_DATE
+    #         AND c.TICKER_SYMBOL = a.TICKER_SYMBOL
+    #     """
+    # query_from_remote_upsert_into_local(
+    #     query_sql,
+    #     table="fund_derivatives_enhanced_index_alpha",
+    #     query_db_conn=DB_CONN_JJTG_DATA,
+    # )
 
 
 def update_fund_derivatives_enhanced_index_performance(
@@ -1352,10 +1354,11 @@ def update_derivatives_db(update_date: str = None):
 
 
 if __name__ == "__main__":
-    update_fund_adj_nav()
+    # update_fund_adj_nav()
     # update_temperature_stock("20240417")
-    # update_fund_derivatives_enhanced_index_performance()
-    # dts = dm.get_period_end_date(start_date="20240501", end_date="20240711", period="d")
+    update_fund_derivatives_enhanced_index_performance()
+    update_fund_derivatives_enhanced_index_performance_rank()
+    # dts = dm.get_period_end_date(start_date="20240711", end_date="20241021", period="d")
     # for dt in dts:
     #     print(dt)
-    #     update_portfolio_benchmark_ret(dt)
+    #     update_fund_derivatives_enhanced_index_alpha(dt)

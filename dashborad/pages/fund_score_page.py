@@ -26,7 +26,6 @@ ID = ids["fund_score_page"]
 def layout(**kwargs) -> html.Div:
     return html.Div(
         [
-
             dbc.Row(
                 [
                     dbc.Col(
@@ -140,7 +139,7 @@ def create_fund_score_table(n_clicks) -> html.Div:
 def download_fund_score_table(_, table: dict):
     buffer = BytesIO()
     try:
-        df = pd.DataFrame(table["props"]["data"])
+        df = pd.DataFrame(table["props"]["children"][0]["props"]["rowData"])
     except TypeError:
         print(TypeError)
         df = pd.DataFrame()

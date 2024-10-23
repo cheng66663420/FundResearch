@@ -157,6 +157,8 @@ def __helper_func(constant_dates_df, date):
     # 特别日期
     if date > "20240329":
         period_end_date_dict.update({"TGDS_1": ("20240329", date)})
+    if date > "20240930":
+        period_end_date_dict.update({"TGDS_2": ("20240930", date)})
     period_end_date_df = pd.DataFrame(period_end_date_dict).T
     period_end_date_df.columns = ["START_DATE", "END_DATE"]
     period_end_date_df = period_end_date_df.reset_index()
@@ -237,7 +239,6 @@ class BasePerformance:
         self.start_date = start_date if start_date else self.end_date
 
     def calculate(self, table, data_name_list: str = None):
-
         time_stamp1 = datetime.datetime.now()
         dates_df = get_needed_dates_df(
             start_date=self.start_date, end_date=self.end_date

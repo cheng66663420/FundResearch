@@ -22,7 +22,7 @@ class GoodNewsSender:
         self.min_amount = min_amount
         self.black_list = [] if black_list is None else black_list
         self.template_path = "E:/基金投顾自动化/"
-        self.data = self._prepare_data()
+        self.data, self.redeem_data = self._prepare_data()
         self.big_data = self.data.query(f"委托金额 >= {self.min_amount}")
         self.big_data = self.big_data[~self.big_data["组合名称"].isin(self.black_list)]
         self.wx = WxWrapper()
@@ -37,6 +37,13 @@ class GoodNewsSender:
         data["委托时间"] = pd.to_datetime(data["委托时间"]).dt.strftime("%Y%m%d")
         data["委托金额"] = data["委托金额"] / 10000
         data = data[data["委托时间"] == self.trade_time]
+        redeem_data = data[data["交易类型"].isin(["减少投资", "解约"])]
+
+        redeem_data = (
+            redeem_data.groupby(by=["组合名称"])["委托金额"].sum().reset_index()
+        )
+        redeem_data = redeem_data.sort_values(by="委托金额", ascending=False)
+
         data = data[
             data["交易类型"].isin(
                 [
@@ -48,6 +55,7 @@ class GoodNewsSender:
                 ]
             )
         ]
+
         # data = data.query(f"委托金额 >= {self.min_amount}")
         data = (
             data.groupby(by=["分公司", "委托时间", "客户编号", "组合名称"])["委托金额"]
@@ -55,8 +63,8 @@ class GoodNewsSender:
             .reset_index()
             .sort_values(by="委托金额", ascending=False)
         )
-        data.index = range(0, len(data))
-        return data
+        data.index = range(len(data))
+        return data, redeem_data
 
     def get_image_file_list(self, file_path):
         return [
@@ -186,9 +194,16 @@ class GoodNewsSender:
             str_temp = f"{val['组合名称']}:{val['委托金额']:.2f}万元"
             sum_list.append(str_temp)
         sum_str = "\n".join(sum_list)
-
         self.wx.send_text(content=sum_str)
-        print("喜报发送完成了")
+
+        redeem_list = [
+            f"今日赎回总总金额为{self.redeem_data['委托金额'].sum():.2f}万元"
+        ]
+        for _, val in self.redeem_data.iterrows():
+            str_temp = f"{val['组合名称']}:{val['委托金额']:.2f}万元"
+            redeem_list.append(str_temp)
+        redeem_str = "\n".join(redeem_list)
+        self.wx.send_text(content=redeem_str)
 
 
 if __name__ == "__main__":

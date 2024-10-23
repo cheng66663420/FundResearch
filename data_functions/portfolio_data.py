@@ -492,14 +492,14 @@ def query_portfolio_products_ret(end_date: str) -> pd.DataFrame:
 
 def monitor_target_portfolio():
     query_sql = """
-    SELECT
+        SELECT
         a.*,
         b.`累计收益率(止盈后)`,
         b.`年化收益率(止盈后)`,
         c.PORTFOLIO_VALUE AS '最大回撤',
         d.TEMPERATURE AS '权益温度',
         e.`债市温度计` 
-    FROM
+        FROM
         `view_mointor_target_portfolio` a
         JOIN view_mointor_target_portfolio_accumulated b ON a.`组合名称` = b.`组合名称`
         LEFT JOIN portfolio_derivatives_performance c ON c.END_DATE = b.`交易日` 
@@ -509,17 +509,17 @@ def monitor_target_portfolio():
         JOIN view_temperature_stock d ON d.END_DATE = a.`运作起始日` 
         AND d.TICKER_SYMBOL = '000985'
         JOIN view_temperature_bond e ON e.`日期` = d.END_DATE 
-    WHERE
+        WHERE
         1 = 1 
-    ORDER BY
-        `是否年化`,
+        ORDER BY
+        `是否止盈` DESC,
+        `组合名称`,
         `运营结束日期`,
-        `运作起始日`,
-        `是否触发止盈` DESC
+        `运作起始日`
     """
     return DB_CONN_JJTG_DATA.exec_query(query_sql)
 
 
 if __name__ == "__main__":
-    df = query_portfolio_daily_performance("20240618")
+    df = monitor_target_portfolio()
     print(df)

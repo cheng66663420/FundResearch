@@ -82,10 +82,13 @@ def update_dates(trade_date: str = None, df: pd.DataFrame = None) -> pd.DataFram
     df["DATE"] = dates.loc[dates_list, "DATE"]
     for idx in df.index:
         for col in df.columns[1:]:
-            df.loc[idx, col] = get_index_period_ret(
-                ticker_symbol=col.split(".")[0],
-                start_date=df.loc[idx, "DATE"],
-                end_date=df["DATE"].max(),
+            df.loc[idx, col] = (
+                get_index_period_ret(
+                    ticker_symbol=col.split(".")[0],
+                    start_date=df.loc[idx, "DATE"],
+                    end_date=df["DATE"].max(),
+                )
+                * 0.95
             )
     return df
 
@@ -213,7 +216,7 @@ if __name__ == "__main__":
                 image_path="E:/基金投顾自动化/结果/策略业绩日报v7.png",
             )
             wx_robot.send_text(
-                content=f"#每日播报 仅供各位领导同事内部参考，请勿对客转发{emoji.emojize('❣')}",
+                content="#每日播报 仅供各位领导同事内部参考，请勿对客转发",
             )
             wx_robot.send_text(
                 content=f"{emoji.emojize('❣')}今日基金投顾业绩播报与目标盈播报已送达,请注意查收{emoji.emojize('❣')}",
