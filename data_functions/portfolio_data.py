@@ -175,6 +175,47 @@ def query_portfolio_daily_performance(end_date: str) -> pd.DataFrame:
     """
     maxdd_df = DB_CONN_JJTG_DATA.exec_query(maxdd_sql)
     df = df.merge(maxdd_df, how="left")
+
+    new_high_sql = f"""
+    WITH max AS ( 
+    SELECT 
+    PORTFOLIO_NAME, 
+    max( PORTFOLIO_RET_ACCUMULATED ) AS MAX_RET 
+    FROM 
+    portfolio_derivatives_ret WHERE TRADE_DT <= '{end_date}' GROUP BY PORTFOLIO_NAME ) SELECT
+    a.TRADE_DT AS END_DATE,
+    a.PORTFOLIO_NAME,
+    CASE
+        
+        WHEN PORTFOLIO_RET_ACCUMULATED >= max.MAX_RET THEN
+        '是' ELSE '否' 
+    END AS '是否新高' 
+    FROM
+    portfolio_derivatives_ret a
+    JOIN max ON a.PORTFOLIO_NAME = max.PORTFOLIO_NAME
+    JOIN portfolio_info b ON b.PORTFOLIO_NAME = a.PORTFOLIO_NAME 
+    WHERE
+    1 = 1 
+    AND a.TRADE_DT = '{end_date}' 
+    AND ifnull( b.DELISTED_DATE, "20991231" ) >= a.TRADE_DT 
+    AND b.listed_date <= a.TRADE_DT AND b.INCLUDE_QDII = 0 UNION SELECT a.TRADE_DT AS END_DATE, a.PORTFOLIO_NAME, CASE WHEN PORTFOLIO_RET_ACCUMULATED >= max.MAX_RET THEN
+        '是' ELSE '否' 
+    END AS '是否新高' 
+    FROM
+    portfolio_derivatives_ret a
+    JOIN max ON a.PORTFOLIO_NAME = max.PORTFOLIO_NAME
+    JOIN portfolio_info b ON b.PORTFOLIO_NAME = a.PORTFOLIO_NAME
+    JOIN md_tradingdaynew c ON c.PREV_TRADE_DATE = a.TRADE_DT 
+    WHERE
+    1 = 1 
+    AND c.TRADE_DT = '{end_date}' 
+    AND ifnull( b.DELISTED_DATE, "20991231" ) >= a.TRADE_DT 
+    AND b.listed_date <= a.TRADE_DT 
+    AND b.INCLUDE_QDII = 1 
+    AND c.SECU_MARKET = 83
+    """
+    new_high = DB_CONN_JJTG_DATA.exec_query(new_high_sql)
+    df = df.merge(new_high, how="left")
     df = df.set_index("END_DATE")
     return df
 

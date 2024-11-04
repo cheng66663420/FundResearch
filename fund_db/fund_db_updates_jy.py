@@ -37,7 +37,7 @@ def get_max_jsid(table: str):
 
 
 def query_from_remote_upsert_into_local(
-    query_sql: str, table: str, query_db_conn, upsert_db_conn=DB_CONN_JJTG_DATA
+    query_sql: str, table: str, query_db_conn, upsert_db_conn=DB_CONN_JY_LOCAL
 ):
     """
     从远程查询，插入本地数据表
@@ -57,7 +57,6 @@ def query_from_remote_upsert_into_local(
     # 查询数据
     df = query_db_conn.exec_query(query_sql)
     print(f"{table}查询结束!")
-
     df = df.drop_duplicates()
     if not df.empty:
         upsert_db_conn.upsert(df_to_upsert=df, table=table)

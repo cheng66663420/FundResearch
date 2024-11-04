@@ -5,7 +5,6 @@ Created on Fri May 27 15:32:52 2022
 @author: Wilcoxon
 """
 
-
 import pandas as pd
 
 import quant_utils.data_moudle as dm
@@ -265,6 +264,7 @@ if __name__ == "__main__":
     month = ["0228", "0531", "0831", "1130"]
     dates_list = [str(i) + j for i in range(2024, 2025) for j in month]
     # # dates_list += ["20230131"]
+    dates_list = ["20241028"]
     for end_date in dates_list:
         test = FundClassifition(end_date, 4)
         test.main()

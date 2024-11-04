@@ -114,9 +114,9 @@ class MySQL:
                 yield df.iloc[start:end]
 
         def _create_upsert_sql(table: str, df: pd.DataFrame) -> str:
-            columns = ", ".join(df.columns)
+            columns = ", ".join([f"`{col}`" for col in df.columns])
             placeholders = ", ".join([f":{col}" for col in df.columns])
-            updates = ", ".join([f"{col} = values({col})" for col in df.columns])
+            updates = ", ".join([f"`{col}` = values(`{col}`)" for col in df.columns])
             return f"""
             INSERT INTO {table} ({columns})
             VALUES ({placeholders})
@@ -135,6 +135,7 @@ class MySQL:
                     connection.commit()
                 except Exception as e:
                     logging.error("Error during upsert: %s", e)
+                    print(e)
                     connection.rollback()
         logging.info("%s: 更新插入%d 行数据", table, affected_rows_total)
 

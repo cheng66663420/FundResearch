@@ -66,6 +66,7 @@ def query_from_remote_upsert_into_local(
     # 查询数据
     df = query_db_conn.exec_query(query_sql)
     print(f"{table}查询结束!")
+
     if if_rename:
         df.rename(
             columns={
@@ -83,7 +84,6 @@ def query_from_remote_upsert_into_local(
     # 写入数据
     # df = df.where(df.notnull(), None)
     df = df.drop_duplicates()
-
     if not df.empty:
         jsid_list = df["JSID"].tolist()
         jsid_list.sort()
@@ -772,7 +772,7 @@ def update_jy_tbales():
         query_from_remote_upsert_into_local(
             query_sql=query_sql,
             table=table,
-            query_db_conn=DB_CONN_JY_LOCAL,
+            query_db_conn=DB_CONN_JY,
             upsert_db_conn=DB_CONN,
             if_rename=0,
         )
@@ -1326,7 +1326,6 @@ def update_fund_related():
 
 
 def update_derivatives_jy():
-
     update_func_list = [
         update_jy_tbales,
         update_aindex_sw_eod,
@@ -1375,4 +1374,4 @@ def update_derivatives_jy():
 
 
 if __name__ == "__main__":
-    update_derivatives_jy()
+    update_jy_tbales()

@@ -1356,9 +1356,10 @@ def update_derivatives_db(update_date: str = None):
 if __name__ == "__main__":
     # update_fund_adj_nav()
     # update_temperature_stock("20240417")
-    update_fund_derivatives_enhanced_index_performance()
-    update_fund_derivatives_enhanced_index_performance_rank()
+    # update_fund_derivatives_enhanced_index_performance()
+    # update_fund_derivatives_enhanced_index_performance_rank()
+    update_portfolio_benchmark_ret("20240814")
     # dts = dm.get_period_end_date(start_date="20240711", end_date="20241021", period="d")
     # for dt in dts:
     #     print(dt)
-    #     update_fund_derivatives_enhanced_index_alpha(dt)
+    #     update_portfolio_benchmark_ret(dt)

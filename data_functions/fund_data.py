@@ -38,7 +38,7 @@ def query_fund_info(
         "SEC_SHORT_NAME",
         "IS_MAIN",
         "IS_ILLIQUID",
-    ]
+    ],
 ) -> pd.DataFrame:
     """
     查询基金信息
@@ -73,7 +73,7 @@ def query_fund_fee(
         "TOTAL_FEE",
         "7d",
         "30d",
-    ]
+    ],
 ) -> pd.DataFrame:
     """
     查询基金费率
@@ -104,7 +104,7 @@ def query_basic_products(
         "IF_IN_TRANCHE",
         "TRANCHE",
         "FIRST_BUY",
-    ]
+    ],
 ) -> pd.DataFrame:
     """
     查询基金投顾产品池情况
@@ -228,15 +228,11 @@ def get_fund_alpha_to_index(
     query_sql = f"""
     WITH b AS ( 
         SELECT 
-            TRADE_DT, LOG_RET 
-        FROM aindex_eod_prices 
-            WHERE TICKER_SYMBOL = '{index_code}' 
-        UNION 
-        SELECT 
-            TRADE_DT, LOG_RET 
-            FROM fund_index_eod 
+            tradingDay as TRADE_DT, 
+            (log( closePrice ) - log( PrevClosePrice ))*100 as LOG_RET
+        FROM jy_indexquote 
         WHERE 
-        TICKER_SYMBOL = '{index_code}' 
+            SecuCode = '{index_code}'
     ) SELECT
     a.END_DATE,
     c.SEC_SHORT_NAME,

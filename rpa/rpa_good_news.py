@@ -196,9 +196,7 @@ class GoodNewsSender:
         sum_str = "\n".join(sum_list)
         self.wx.send_text(content=sum_str)
 
-        redeem_list = [
-            f"今日赎回总总金额为{self.redeem_data['委托金额'].sum():.2f}万元"
-        ]
+        redeem_list = [f"今日赎回总金额为{self.redeem_data['委托金额'].sum():.2f}万元"]
         for _, val in self.redeem_data.iterrows():
             str_temp = f"{val['组合名称']}:{val['委托金额']:.2f}万元"
             redeem_list.append(str_temp)
