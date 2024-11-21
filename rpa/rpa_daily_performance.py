@@ -160,14 +160,17 @@ def rpa_daily_target_portfolio_performance():
             start_row=2,
             start_column=1,
         )
+        row_num, col_num = target_portfolio.shape
         # 复制格式
         source_range = excel_handler.select_range(
             start_row=3, start_column=1, expand="right"
         )
-        target_range = excel_handler.select_range(
-            start_row=3, start_column=1, expand="table"
-        )
-        excel_handler.format_painter(source_range, target_range)
+
+        for row in range(3, row_num + 3):
+            target_range = excel_handler.select_range(
+                start_row=row, start_column=1, expand="right"
+            )
+            excel_handler.format_painter(source_range, target_range)
 
         # 判断止盈
         for idx, val in target_portfolio.iterrows():
@@ -187,17 +190,22 @@ def rpa_daily_target_portfolio_performance():
 
         # 保存
         excel_handler.save("E:/基金投顾自动化/日报周报/结果/目标盈日度监控.xlsx")
+
+    with ExcelWrapper(
+        "E:/基金投顾自动化/日报周报/结果/目标盈日度监控.xlsx"
+    ) as excel_handler:
         excel_handler.save_as_image("E:/基金投顾自动化/结果/目标盈日度监控.png")
-        add_mark(
-            file="E:/基金投顾自动化/结果/目标盈日度监控.png",
-            out="E:/基金投顾自动化/结果/",
-            mark="仅限内部参考，不可对外发送!",
-            opacity=0.15,
-            angle=30,
-            space=100,
-            size=50,
-            color="#DB7093",
-        )
+
+    add_mark(
+        file="E:/基金投顾自动化/结果/目标盈日度监控.png",
+        out="E:/基金投顾自动化/结果/",
+        mark="仅限内部参考，不可对外发送!",
+        opacity=0.15,
+        angle=30,
+        space=100,
+        size=50,
+        color="#DB7093",
+    )
 
 
 if __name__ == "__main__":

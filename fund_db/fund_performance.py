@@ -5,7 +5,9 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 from tqdm import tqdm
-
+import polars as pl
+from quant_pl.performance_pl import PerformancePL
+from dateutil.parser import parse
 import quant_utils.data_moudle as dm
 from fund_db.fund_db_updates import update_fund_performance_rank
 from quant_utils.constant_varialbles import LAST_TRADE_DT
@@ -14,6 +16,27 @@ from quant_utils.performance import Performance
 from quant_utils.utils import yield_split_list
 
 INIT_DATE = "20210903"
+
+
+def get_fund_nav_by_pl(
+    start_date: str, end_date: str, parquet_path: str = "F:/data_parquet/fund_nav/"
+):
+    start_date = parse(start_date)
+    end_date = parse(end_date)
+    return (
+        pl.scan_parquet(f"{parquet_path}*.parquet")
+        .select(
+            [
+                pl.col("END_DATE").cast(pl.Datetime),
+                pl.col("TICKER_SYMBOL").cast(pl.String),
+                pl.col("ADJ_NAV").cast(pl.Float64).alias("NAV"),
+            ]
+        )
+        .filter((pl.col("END_DATE") >= start_date) & (pl.col("END_DATE") <= end_date))
+        .sort(
+            by=["END_DATE", "TICKER_SYMBOL"],
+        )
+    ).collect()
 
 
 def parallel_cal_performance(
@@ -251,46 +274,53 @@ class BasePerformance:
         time_stamp2 = datetime.datetime.now()
 
         print(f"日期处理完成, 用时{time_stamp2 - time_stamp1}")
-        df_nav_temp = self.get_nav().sort_values(["TICKER_SYMBOL", "END_DATE"])
-        df_nav_temp = df_nav_temp.set_index("END_DATE")
-        ticker_list = df_nav_temp["TICKER_SYMBOL"].unique().tolist()
-        time_stamp_nav = datetime.datetime.now()
-
-        print(f"净值处理完成, 用时{time_stamp_nav - time_stamp2}")
-        counter = 0
-        update_desc_flag = 1
-        for tickers in tqdm(
-            yield_split_list(ticker_list, 1000), position=0, leave=True
-        ):
-            temp_nav = df_nav_temp[df_nav_temp["TICKER_SYMBOL"].isin(tickers)]
-
-            time_stamp3 = datetime.datetime.now()
-            result_list = Parallel(n_jobs=-1, backend="multiprocessing")(
-                delayed(parallel_cal_performance)(
-                    ticker=ticker,
-                    df_grouped=grouped_nav_df,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-                for ticker, grouped_nav_df in tqdm(
-                    temp_nav.groupby(by="TICKER_SYMBOL"), position=0
-                )
-                for _, (start_date, end_date) in dates_df.iterrows()
+        df_nav_temp = self.get_nav()
+        if isinstance(df_nav_temp, pd.DataFrame):
+            df_nav_temp = pl.from_pandas(df_nav_temp).with_columns(
+                pl.col("END_DATE").str.to_datetime(format="%Y%m%d")
             )
-            if all(i is None for i in result_list):
-                tqdm.write("结果都是None")
-                # tqdm.write("=*" * 30)
-                update_desc_flag = 0
-            else:
-                result = pd.concat(result_list).rename(columns=self.rename_dict)
-                cols = ["CUM_RETURN", "ANNUAL_RETURN", "ANNUAL_VOLATILITY", "MAXDD"]
-                result[cols] = result[cols] * 100
-                time_stamp4 = datetime.datetime.now()
-                tqdm.write(f"计算处理完成_{counter}, 用时{time_stamp4 - time_stamp3}")
-                DB_CONN_JJTG_DATA.upsert(result, table=table)
-                time_stamp5 = datetime.datetime.now()
-                tqdm.write(f"写入处理完成_{counter}, 用时{time_stamp5 - time_stamp4}")
-            counter += 1
+        time_stamp_nav = datetime.datetime.now()
+        print(f"净值处理完成, 用时{time_stamp_nav - time_stamp2}")
+        update_desc_flag = 0
+        result_list = []
+        for idx, (start_date, end_date) in dates_df.iterrows():
+            perf = PerformancePL(df_nav_temp, start_date=start_date, end_date=end_date)
+            result = perf.stats().to_pandas()
+
+            result_list.append(result)
+            # counter += 1
+        if all(i is None for i in result_list):
+            tqdm.write("结果都是None")
+            # tqdm.write("=*" * 30)
+            update_desc_flag = 0
+        else:
+            result = pd.concat(result_list).drop(columns=["RECOVER_DATE"])
+            time_stamp3 = datetime.datetime.now()
+            print(f"计算完成, 用时{time_stamp3 - time_stamp_nav}")
+            DB_CONN_JJTG_DATA.upsert(result, table=table)
+            print(f"写入完成, 用时{datetime.datetime.now() - time_stamp3}")
+            update_desc_flag = 1
+        # counter = 0
+        # update_desc_flag = 1
+        # for tickers in tqdm(
+        #     yield_split_list(ticker_list, 1000), position=0, leave=True
+        # ):
+        #     temp_nav = df_nav_temp[df_nav_temp["TICKER_SYMBOL"].isin(tickers)]
+
+        #     time_stamp3 = datetime.datetime.now()
+        #     result_list = Parallel(n_jobs=-1, backend="multiprocessing")(
+        #         delayed(parallel_cal_performance)(
+        #             ticker=ticker,
+        #             df_grouped=grouped_nav_df,
+        #             start_date=start_date,
+        #             end_date=end_date,
+        #         )
+        #         for ticker, grouped_nav_df in tqdm(
+        #             temp_nav.groupby(by="TICKER_SYMBOL"), position=0
+        #         )
+        #         for _, (start_date, end_date) in dates_df.iterrows()
+        #     )
+
         time_stamp6 = datetime.datetime.now()
         print(f"总用时{time_stamp6 - time_stamp1}")
         if update_desc_flag != 0:
@@ -311,34 +341,41 @@ class FundPerformance(BasePerformance):
         FROM 
             fund_perf_desc 
         WHERE 
-            NAV_END_DATE > IFNULL( FUND_PERF_END_DATE, '20000101' ) 
+            1=1
+            and NAV_END_DATE > IFNULL( FUND_PERF_END_DATE, '20000101' ) 
             AND NAV_END_DATE >= '{self.start_date}' 
         """
-        ticker_list = DB_CONN_JJTG_DATA.exec_query(query_sql)["TICKER_SYMBOL"].tolist()
-
+        ticker_df = DB_CONN_JJTG_DATA.exec_query(query_sql)
+        ticker_df = pl.from_pandas(ticker_df)
         start_date = dm.offset_trade_dt(self.start_date, 1300)
         dates = dm.get_trade_cal(start_date, self.end_date)
         date_df = pd.DataFrame(dates, columns=["END_DATE"])
-        nav = Parallel(n_jobs=-1, backend="multiprocessing")(
-            delayed(feather.read_dataframe)(
-                source=f"f:/data_ftr/fund_nav/{date}.ftr",
-                columns=["END_DATE", "TICKER_SYMBOL", "ADJ_NAV"],
-            )
-            for date in tqdm(dates)
+        date_df = pl.from_pandas(date_df).select(
+            pl.col("END_DATE").str.to_datetime("%Y%m%d")
         )
-        nav = pd.concat(nav)
-        # ticker_list = ["017826"]
-        nav = nav[nav["TICKER_SYMBOL"].isin(ticker_list)]
-        nav["END_DATE"] = nav["END_DATE"].apply(lambda x: x.strftime("%Y%m%d"))
-        nav = nav.sort_values(by=["END_DATE", "TICKER_SYMBOL"])
-        nav_list = []
-        for _, df in nav.groupby(by="TICKER_SYMBOL"):
-            temp_df = df.copy()
-            temp_df = date_df.merge(temp_df, how="left", on=["END_DATE"])
-            temp_df = temp_df.ffill().dropna()
-            nav_list.append(temp_df)
-        nav = pd.concat(nav_list)
-        nav.rename(columns={"ADJ_NAV": "NAV"}, inplace=True)
+        nav = (
+            get_fund_nav_by_pl(start_date, self.end_date)
+            .join(date_df, how="right", on=["END_DATE"])
+            .join(ticker_df, how="inner", on=["TICKER_SYMBOL"])
+            .with_columns(
+                NAV=pl.col("NAV")
+                .fill_null(strategy="forward")
+                .over("TICKER_SYMBOL", order_by="END_DATE"),
+            )
+            .drop_nulls(subset=["NAV"])
+            .sort(["TICKER_SYMBOL", "END_DATE"])
+        )
+
+        # nav["END_DATE"] = nav["END_DATE"].apply(lambda x: x.strftime("%Y%m%d"))
+        # nav = nav.sort_values(by=["END_DATE", "TICKER_SYMBOL"])
+        # nav_list = []
+        # for _, df in nav.groupby(by="TICKER_SYMBOL"):
+        #     temp_df = df.copy()
+        #     temp_df = date_df.merge(temp_df, how="left", on=["END_DATE"])
+        #     temp_df = temp_df.ffill().dropna()
+        #     nav_list.append(temp_df)
+        # nav = pd.concat(nav_list)
+        # nav.rename(columns={"ADJ_NAV": "NAV"}, inplace=True)
         # print(nav)
         return nav
 
@@ -463,5 +500,5 @@ if __name__ == "__main__":
     for date in date_list:
         print(date)
         update_fund_performance_rank(date)
-    # fund_perf = FundPerformance(start_date=start_date, end_date=end_date)
-    # fund_perf.calculate("fund_performance_inner")
+    fund_perf = FundPerformance(start_date=start_date, end_date=end_date)
+    fund_perf.calculate("fund_performance_inner")

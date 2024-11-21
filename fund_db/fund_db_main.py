@@ -30,10 +30,42 @@ def write_nav_into_ftr(date: str, file_path: str = "F:/data_ftr/fund_nav/") -> N
     nav_df = DB_CONN_JJTG_DATA.exec_query(query_sql)
     if not nav_df.empty:
         feather.write_dataframe(nav_df, f"{file_path}{date}.ftr")
+        nav_df.to_parquet(f"F:/data_parquet/fund_nav/{date}.parquet")
+
+
+def write_trade_dt():
+    """
+    每日更新交易日历表
+    """
+    query_sql = """
+    SELECT
+        TRADE_DT,
+        IF_TRADING_DAY,
+        PREV_TRADE_DATE,
+        WEEK_END_DATE,
+        MONTH_END_DATE,
+        QUARTER_END_DATE,
+        YEAR_END_DATE,
+        IF_WEEK_END,
+        IF_MONTH_END,
+        IF_QUARTER_END,
+        IF_YEAR_END 
+    FROM
+        md_tradingdaynew 
+    WHERE
+        1 = 1 
+        AND `SECU_MARKET` = '83' 
+        AND TRADE_DT <= DATE_ADD( CURRENT_DATE, INTERVAL 365 DAY ) 
+    ORDER BY
+        TRADE_DT
+    """
+    df = DB_CONN_JJTG_DATA.exec_query(query_sql)
+    df.to_parquet("F:/data_parquet/trade_cal.parquet")
 
 
 if __name__ == "__main__":
     # update_wind_db()
+    write_trade_dt()
     update_jy_db()
     update_derivatives_jy()
     update_derivatives_db()

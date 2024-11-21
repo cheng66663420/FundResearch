@@ -234,21 +234,6 @@ def cal_fund_inner_alpha_performance(
     end_date = dm.offset_trade_dt(end_date, 0)
     # 获取指数增强基金的超额收益
     query_sql = f"""
-    with b as(
-        SELECT
-            t1.TICKER_SYMBOL 
-        FROM
-            fund_derivatives_fund_alpha t1
-            JOIN fund_type_own t2 ON t1.TICKER_SYMBOL = t2.TICKER_SYMBOL 
-        WHERE
-            1 = 1 
-            AND t2.PUBLISH_DATE = ( 
-                SELECT max( PUBLISH_DATE ) 
-                FROM fund_type_own WHERE PUBLISH_DATE <= '{end_date}' 
-            ) 
-            AND end_date = '{end_date}'
-            and t2.level_1 in ("固收", "固收+", "主动权益")
-    )
     SELECT
         date_format( a.END_DATE, "%Y%m%d" ) AS END_DATE,
         a.TICKER_SYMBOL,
