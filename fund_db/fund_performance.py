@@ -285,7 +285,7 @@ class BasePerformance:
         result_list = []
         for idx, (start_date, end_date) in dates_df.iterrows():
             perf = PerformancePL(df_nav_temp, start_date=start_date, end_date=end_date)
-            result = perf.stats().to_pandas()
+            result = perf.stats().collect().to_pandas()
 
             result_list.append(result)
             # counter += 1
@@ -294,37 +294,16 @@ class BasePerformance:
             # tqdm.write("=*" * 30)
             update_desc_flag = 0
         else:
-            result = pd.concat(result_list).drop(columns=["RECOVER_DATE"])
+            result = pd.concat(result_list)
             time_stamp3 = datetime.datetime.now()
             print(f"计算完成, 用时{time_stamp3 - time_stamp_nav}")
             DB_CONN_JJTG_DATA.upsert(result, table=table)
             print(f"写入完成, 用时{datetime.datetime.now() - time_stamp3}")
-            update_desc_flag = 1
-        # counter = 0
-        # update_desc_flag = 1
-        # for tickers in tqdm(
-        #     yield_split_list(ticker_list, 1000), position=0, leave=True
-        # ):
-        #     temp_nav = df_nav_temp[df_nav_temp["TICKER_SYMBOL"].isin(tickers)]
-
-        #     time_stamp3 = datetime.datetime.now()
-        #     result_list = Parallel(n_jobs=-1, backend="multiprocessing")(
-        #         delayed(parallel_cal_performance)(
-        #             ticker=ticker,
-        #             df_grouped=grouped_nav_df,
-        #             start_date=start_date,
-        #             end_date=end_date,
-        #         )
-        #         for ticker, grouped_nav_df in tqdm(
-        #             temp_nav.groupby(by="TICKER_SYMBOL"), position=0
-        #         )
-        #         for _, (start_date, end_date) in dates_df.iterrows()
-        #     )
-
+            # update_desc_flag = 1
         time_stamp6 = datetime.datetime.now()
         print(f"总用时{time_stamp6 - time_stamp1}")
-        if update_desc_flag != 0:
-            self.update_desc()
+        # if update_desc_flag != 0:
+        #     self.update_desc()
 
     def get_nav(self):
         pass
@@ -500,5 +479,3 @@ if __name__ == "__main__":
     for date in date_list:
         print(date)
         update_fund_performance_rank(date)
-    fund_perf = FundPerformance(start_date=start_date, end_date=end_date)
-    fund_perf.calculate("fund_performance_inner")

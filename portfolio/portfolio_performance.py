@@ -26,15 +26,6 @@ RENAME_DICT = {
     "PEER_PORTFOLIO_RANK": "同类投顾排名",
 }
 
-# INDICATOR_DICT = {
-#     "累计收益率": "CUM_RETURN",
-#     "年化收益率": "ANNUAL_RETURN",
-#     "年化波动率": "ANNUAL_VOLATILITY",
-#     "收益波动比": "SHARP_RATIO_ANNUAL",
-#     "年化收益回撤比": "CALMAR_RATIO_ANNUAL",
-#     "最大回撤": "MAXDD",
-# }
-
 
 def get_portfolio_rank(portfolio_name: str, end_date: str) -> pd.DataFrame:
     peer_query = (

@@ -6,14 +6,14 @@ import polars as pl
 from dateutil.parser import parse
 
 
-def _parse_df(df: pl.DataFrame) -> pl.DataFrame:
+def _parse_df(df: pl.LazyFrame) -> pl.LazyFrame:
     """
     解析净值DataFrame，将END_DATE转换为datetime，TICKER_SYMBOL转换为str，NAV转换为float
 
     Parameters
     ----------
-    df : pl.DataFrame
-        净值DataFrame, 包含列: TICKER_SYMBOL, END_DATE, NAV
+    df : pl.LazyFrame
+        LazyFrame, 包含列: TICKER_SYMBOL, END_DATE, NAV
 
     Returns
     -------
@@ -27,8 +27,8 @@ def _parse_df(df: pl.DataFrame) -> pl.DataFrame:
     ValueError
         _description_
     """
-    if not isinstance(df, pl.DataFrame):
-        raise ValueError("df must be a polars DataFrame")
+    if not isinstance(df, pl.LazyFrame):
+        raise ValueError("df must be a polars LazyFrame")
     try:
         return df.select(
             [
@@ -45,14 +45,14 @@ def _parse_df(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def _filter_df(
-    df: pl.DataFrame, start_date: datetime.datetime, end_date: datetime.datetime
-) -> pl.DataFrame:
+    df: pl.LazyFrame, start_date: datetime.datetime, end_date: datetime.datetime
+) -> pl.LazyFrame:
     """
     筛选出指定日期范围内的基金，只保留开始日期和结束日期都在指定范围内的基金
 
     Parameters
     ----------
-    df : pl.DataFrame
+    df : pl.LazyFrame
         净值数据，包含列: TICKER_SYMBOL, END_DATE, NAV
     start_date : datetime.datetime
         开始日期
@@ -61,12 +61,11 @@ def _filter_df(
 
     Returns
     -------
-    pl.DataFrame
+    pl.LazyFrame
         筛选后的净值数据，包含列: TICKER_SYMBOL, END_DATE, NAV
     """
     return (
-        df.lazy()
-        .filter(pl.col("END_DATE").is_between(start_date, end_date))
+        df.filter(pl.col("END_DATE").is_between(start_date, end_date))
         # 计算每个基金的开始日期和结束日期
         .with_columns(
             START_DATE=pl.col("END_DATE").min().over("TICKER_SYMBOL"),
@@ -75,16 +74,16 @@ def _filter_df(
         # 筛选出开始日期和结束日期都在指定范围内的基金
         .filter((pl.col("START_DATE") == start_date) & (pl.col("MAX_DATE") == end_date))
         .select(pl.all().exclude("MAX_DATE"))
-    ).collect()
+    )
 
 
-def _cal_operation_days(df: pl.DataFrame) -> pl.DataFrame:
+def _cal_operation_days(df: pl.LazyFrame) -> pl.LazyFrame:
     """
     计算每个基金的操作天数
 
     Parameters
     ----------
-    df : pl.DataFrame
+    df : pl.LazyFrame
         净值数据，包含列: TICKER_SYMBOL, END_DATE, NAV
 
     Returns
@@ -93,7 +92,7 @@ def _cal_operation_days(df: pl.DataFrame) -> pl.DataFrame:
         净值数据，包含列: TICKER_SYMBOL, END_DATE, NAV, OPERATION_DAYS
     """
     return (
-        df.lazy()
+        df
         # 计算每个基金的下一个交易日的日期
         .with_columns(
             OPERATION_DATE=pl.col("END_DATE")
@@ -101,13 +100,15 @@ def _cal_operation_days(df: pl.DataFrame) -> pl.DataFrame:
             .over("TICKER_SYMBOL", order_by="END_DATE")
         )
         # 取最小值
-        .with_columns(OPERATION_DATE=pl.col("OPERATION_DATE").min())
+        .with_columns(
+            OPERATION_DATE=pl.col("OPERATION_DATE")
+            .min()
+            .over("TICKER_SYMBOL", order_by="END_DATE")
+        )
         # 计算操作天数
         .with_columns(
             OPERATION_DAYS=(
-                (pl.col("END_DATE") - pl.col("OPERATION_DATE")).dt.total_seconds()
-                / (60 * 60 * 24)
-                + 1
+                (pl.col("END_DATE") - pl.col("OPERATION_DATE")).dt.total_days() + 1
             )
         )
         # 处理操作天数为负数的情况
@@ -116,166 +117,156 @@ def _cal_operation_days(df: pl.DataFrame) -> pl.DataFrame:
             .then(0)
             .otherwise(pl.col("OPERATION_DAYS"))
         )
-    ).collect()
+    )
 
 
 @dataclass
 class PerformanceHelper:
-    df: pl.DataFrame
+    df: pl.DataFrame | pl.LazyFrame
 
-    def daily_cum_return(self):
-        """
-        计算每个基金的累计收益率*100
-        """
-        return (
-            pl.col("NAV")
-            / pl.col("NAV").first().over("TICKER_SYMBOL", order_by="END_DATE")
-            - 1
-        ) * 100
+    def __post_init__(self):
+        if isinstance(self.df, pl.DataFrame):
+            self.df = self.df.lazy()
+        self.df = self.df.sort(
+            by=["TICKER_SYMBOL", "END_DATE"],
+        )
 
-    def daily_return(self) -> pl.DataFrame:
+    def data_name(self) -> pl.LazyFrame:
+        return self.df.group_by("TICKER_SYMBOL").agg(
+            START_DATE=pl.col("END_DATE").min(),
+            END_DATE=pl.col("END_DATE").max(),
+            OPERATION_DAYS=pl.col("OPERATION_DAYS").max(),
+        )
+
+    def daily_return(self) -> pl.LazyFrame:
         """
         计算每个基金的日收益率*100
         """
-        return (
-            pl.col("NAV").pct_change().over("TICKER_SYMBOL", order_by="END_DATE") * 100
-        )
-
-    def daily_drawdown(self):
-        return (
-            1
-            - pl.col("NAV")
-            / pl.col("NAV").cum_max().over("TICKER_SYMBOL", order_by="END_DATE")
-        ) * 100
-
-    def std(self, col_name="DAILY_RETURN"):
-        return (pl.col(col_name) / 100).std().over(
-            "TICKER_SYMBOL", order_by="END_DATE"
-        ) * 100
-
-    def annual_ret(self, col_name="CUM_RETURN"):
-        return (
-            (pl.col(col_name) / 100 + 1) ** (365 / pl.col("OPERATION_DAYS")) - 1
-        ) * 100
-
-    def max_drawdown(self, col_name="DAILY_DRAWDOWN"):
-        return pl.col(col_name).max().over("TICKER_SYMBOL", order_by="END_DATE")
-
-    def max_drawdown_recover(self):
-        maxdd = (
-            self.df.with_columns(DAILY_DRAWDOWN=self.daily_drawdown())
-            .with_columns(MAX_DRAWDOWN=self.max_drawdown())
-            .select(
-                pl.col("TICKER_SYMBOL"),
-                pl.col("END_DATE"),
-                pl.col("DAILY_DRAWDOWN"),
-                pl.col("MAX_DRAWDOWN"),
-            )
-        )
-
-        maxdd_date = maxdd.filter(
-            (pl.col("DAILY_DRAWDOWN") == pl.col("MAX_DRAWDOWN"))
-            & (pl.col("MAX_DRAWDOWN") != 0)
+        return self.df.with_columns(
+            DAILY_RETURN=pl.col("NAV")
+            .pct_change()
+            .over("TICKER_SYMBOL", order_by="END_DATE")
+            * 100
         ).select(
             pl.col("TICKER_SYMBOL"),
-            pl.col("END_DATE").max().over("TICKER_SYMBOL").alias("MAXDD_DATE"),
+            pl.col("END_DATE"),
+            pl.col("DAILY_RETURN"),
         )
 
+    def daily_drawdown(self) -> pl.LazyFrame:
+        return self.df.with_columns(
+            DAILY_DRAWDOWN=(1 - pl.col("NAV") / pl.col("NAV").cum_max()).over(
+                "TICKER_SYMBOL", order_by="END_DATE"
+            )
+            * 100
+        ).select(
+            pl.col("TICKER_SYMBOL"),
+            pl.col("END_DATE"),
+            pl.col("DAILY_DRAWDOWN"),
+        )
+
+    def cum_return(self) -> pl.LazyFrame:
+        """
+        计算每个基金的累计收益率*100
+        """
+
+        return self.df.group_by("TICKER_SYMBOL").agg(
+            CUM_RETURN=(pl.col("NAV").last() / pl.col("NAV").first() - 1) * 100
+        )
+
+    def volatility(self) -> pl.LazyFrame:
+        return (
+            self.daily_return()
+            .group_by("TICKER_SYMBOL")
+            .agg(VOLATILITY=(pl.col("DAILY_RETURN") / 100).std() * 100)
+        )
+
+    # def annual_ret(self):
+    #     return self.cum_return().group_by("TICKER_SYMBOL").agg(
+    #         ANNUAL_RET=(pl.col("DAILY_RETURN") / 100).mean() * 252 * 100
+    #     )
+
+    def max_drawdown(self):
+        return (
+            self.daily_drawdown()
+            .group_by("TICKER_SYMBOL")
+            .agg(MAX_DRAWDOWN=pl.col("DAILY_DRAWDOWN").max())
+        )
+
+    def max_drawdown_recover(self) -> pl.LazyFrame:
+        daily_drawdown = self.daily_drawdown()
+        max_drawdown = self.max_drawdown()
+
+        maxdd = daily_drawdown.join(max_drawdown, on="TICKER_SYMBOL", how="left")
+        maxdd_date = (
+            maxdd.filter(
+                (pl.col("DAILY_DRAWDOWN") == pl.col("MAX_DRAWDOWN"))
+                & (pl.col("MAX_DRAWDOWN") != 0)
+            )
+            .group_by("TICKER_SYMBOL")
+            .agg(MAXDD_DATE=pl.col("END_DATE").max())
+        )
         recover_date = (
             maxdd.join(maxdd_date, on="TICKER_SYMBOL", how="left")
             .filter(
                 (pl.col("END_DATE") >= pl.col("MAXDD_DATE"))
                 & (pl.col("DAILY_DRAWDOWN") == 0)
             )
-            .with_columns(
+            .group_by("TICKER_SYMBOL")
+            .agg(MAXDD_RECOVERY_DATE=pl.col("END_DATE").min())
+        )
+        return (
+            max_drawdown.join(maxdd_date, on="TICKER_SYMBOL", how="left")
+            .join(recover_date, on="TICKER_SYMBOL", how="left")
+            .select(
                 [
-                    pl.col("END_DATE")
-                    .min()
-                    .over("TICKER_SYMBOL")
-                    .alias("MIN_DD_RECOVERY_DATE")
+                    pl.col("TICKER_SYMBOL"),
+                    pl.col("MAXDD_DATE"),
+                    pl.col("MAXDD_RECOVERY_DATE"),
+                    pl.col("MAX_DRAWDOWN"),
+                    (pl.col("MAXDD_RECOVERY_DATE") - pl.col("MAXDD_DATE"))
+                    .dt.total_days()
+                    .fill_null(99999)
+                    .alias("MAXDD_RECOVER"),
                 ]
             )
-            # 筛选出最小的回撤修复日期
-            .filter((pl.col("END_DATE") == pl.col("MIN_DD_RECOVERY_DATE")))
-            # 计算最大回撤修复天数
-            .select(
-                pl.col("TICKER_SYMBOL"),
-                pl.col("MAXDD_DATE"),
-                pl.col("MIN_DD_RECOVERY_DATE").alias("RECOVER_DATE"),
+        )
+
+    def stats(self) -> pl.LazyFrame:
+        result = (
+            self.data_name()
+            .join(self.cum_return(), on="TICKER_SYMBOL", how="left")
+            .join(self.volatility(), on="TICKER_SYMBOL", how="left")
+            .join(self.max_drawdown_recover(), on="TICKER_SYMBOL", how="left")
+        )
+        result = result.select(
+            TICKER_SYMBOL=pl.col("TICKER_SYMBOL"),
+            START_DATE=pl.col("START_DATE"),
+            END_DATE=pl.col("END_DATE"),
+            CUM_RETURN=pl.col("CUM_RETURN"),
+            ANNUAL_RETURN=(
                 (
-                    (
-                        pl.col("MIN_DD_RECOVERY_DATE") - pl.col("MAXDD_DATE")
-                    ).dt.total_seconds()
-                    / (60 * 60 * 24)
-                ).alias("MAXDD_RECOVER"),
-            )
+                    (pl.col("CUM_RETURN") / 100 + 1) ** (365 / pl.col("OPERATION_DAYS"))
+                    - 1
+                )
+                * 100
+            ),
+            VOLATILITY=pl.col("VOLATILITY"),
+            ANNUAL_VOLATILITY=pl.col("VOLATILITY") * np.sqrt(252),
+            MAXDD=pl.col("MAX_DRAWDOWN"),
+            MAXDD_RECOVER=pl.col("MAXDD_RECOVER"),
+            MAXDD_DATE=pl.col("MAXDD_DATE"),
+        ).with_columns(
+            SHARP_RATIO=pl.col("CUM_RETURN") / pl.col("VOLATILITY"),
+            SHARP_RATIO_ANNUAL=pl.col("ANNUAL_RETURN") / pl.col("ANNUAL_VOLATILITY"),
+            CALMAR_RATIO_ANNUAL=pl.col("ANNUAL_RETURN") / pl.col("MAXDD"),
         )
-        return (
-            maxdd_date.join(recover_date, on="TICKER_SYMBOL", how="left").with_columns(
-                [pl.col("MAXDD_RECOVER").fill_null(99999)]
-            )
-        ).lazy()
-
-    def _before_stats(self):
-        maxdd = self.max_drawdown_recover()
-
-        end_date_df = (
-            self.df.select(
-                pl.col("TICKER_SYMBOL"),
-                pl.col("START_DATE").min().over("TICKER_SYMBOL").alias("START_DATE"),
-                pl.col("END_DATE").max().over("TICKER_SYMBOL").alias("END_DATE"),
-            )
-            .unique()
-            .lazy()
-        )
-        return (
-            self.df.lazy()
-            .with_columns(
-                CUM_RETURN=self.daily_cum_return(),
-                DAILY_RETURN=self.daily_return(),
-                DAILY_DRAWDOWN=self.daily_drawdown(),
-            )
-            .with_columns(
-                ANNUAL_RETURN=self.annual_ret(),
-                MAX_DRAWDOWN=self.max_drawdown(),
-                VOLATILITY=self.std(),
-                ANNUAL_VOLATILITY=self.std() * np.sqrt(252),
-            )
-            .join(
-                end_date_df, on=["TICKER_SYMBOL", "END_DATE", "START_DATE"], how="right"
-            )
-            .join(maxdd, on="TICKER_SYMBOL", how="left")
-        ).collect()
-
-    def stats(self):
-        # print(self._before_stats())
-        return self._before_stats().select(
-            [
-                pl.col("TICKER_SYMBOL"),
-                pl.col("START_DATE"),
-                pl.col("END_DATE"),
-                pl.col("CUM_RETURN"),
-                pl.col("ANNUAL_RETURN"),
-                pl.col("VOLATILITY"),
-                pl.col("ANNUAL_VOLATILITY"),
-                (pl.col("CUM_RETURN") / pl.col("VOLATILITY")).alias("SHARP_RATIO"),
-                (pl.col("ANNUAL_RETURN") / pl.col("ANNUAL_VOLATILITY")).alias(
-                    "SHARP_RATIO_ANNUAL"
-                ),
-                pl.col("MAX_DRAWDOWN").alias("MAXDD"),
-                (pl.col("ANNUAL_RETURN") / pl.col("MAX_DRAWDOWN")).alias(
-                    "CALMAR_RATIO_ANNUAL"
-                ),
-                pl.col("MAXDD_DATE"),
-                pl.col("MAXDD_RECOVER"),
-                pl.col("RECOVER_DATE"),
-            ]
-        )
+        return result
 
 
 @dataclass
 class PerformancePL:
-    df: pl.DataFrame
+    df: pl.DataFrame | pl.LazyFrame
     start_date: str
     end_date: str
 
@@ -305,7 +296,7 @@ class PerformancePL:
             return date
         raise ValueError("Invalid date format")
 
-    def _prepare_df(self) -> pl.DataFrame:
+    def _prepare_df(self) -> pl.LazyFrame:
         """
         准备净值数据
 
@@ -314,11 +305,13 @@ class PerformancePL:
         pl.DataFrame
             净值数据
         """
+        if isinstance(self.df, pl.DataFrame):
+            self.df = self.df.lazy()
         self.df = _parse_df(self.df)
         self.df = _filter_df(self.df, self.start_date, self.end_date)
         self.df = _cal_operation_days(self.df)
 
-    def stats(self):
+    def stats(self) -> pl.LazyFrame:
         return PerformanceHelper(self.df).stats()
 
 
@@ -374,20 +367,21 @@ if __name__ == "__main__":
 
     import time
 
-    for _ in range(10):
-        start_time = time.time()
-        df = get_fund_nav_by_parquet("20220101", "20241119")
-        end_time = time.time()
-        print(f"duckdb_read_time: {end_time - start_time}")
-    for _ in range(10):
-        start_time = time.time()
-        df = get_fund_nav_by_pl("20220101", "20241119")
-        end_time = time.time()
-        print(f"polars_read_time: {end_time - start_time}")
+    # for _ in range(10):
+    #     start_time = time.time()
+    #     df = get_fund_nav_by_parquet("20220101", "20241119")
+    #     end_time = time.time()
+    #     print(f"duckdb_read_time: {end_time - start_time}")
+
+    start_time = time.time()
+    df = get_fund_nav_by_pl("20231229", "20241121")
+    end_time = time.time()
+    print(f"polars_read_time: {end_time - start_time}")
     cal_time_list = []
-    for _ in range(10):
+    for _ in range(1):
         start_time = time.time()
-        perf_df = PerformancePL(df, "20231229", "20241119").stats()
+        perf_df = PerformancePL(df, "20231229", "20241121")
+        perf_df.stats().collect().write_excel("F:/test.xlsx")
         end_time = time.time()
         print(f"Time: {end_time - start_time}")
         cal_time_list.append(end_time - start_time)
