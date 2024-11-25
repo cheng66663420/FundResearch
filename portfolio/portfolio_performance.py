@@ -1,12 +1,11 @@
 import datetime
-from concurrent.futures import ProcessPoolExecutor
 
 import pandas as pd
-from tqdm import tqdm
+import polars as pl
 
 import quant_utils.data_moudle as dm
 from data_functions.portfolio_data import get_portfolio_info, query_portfolio_nav
-from quant_utils.constant import DATE_FORMAT, TODAY
+from quant_utils.constant import DATE_FORMAT, DB_CONFIG, TODAY
 from quant_utils.constant_varialbles import LAST_TRADE_DT
 from quant_utils.db_conn import DB_CONN_JJTG_DATA
 from quant_utils.send_email import MailSender
@@ -27,660 +26,409 @@ RENAME_DICT = {
 }
 
 
-def get_portfolio_rank(portfolio_name: str, end_date: str) -> pd.DataFrame:
+def crate_database_uri(config: dict) -> str:
+    return f"mysql://{config['user']}:{config['pwd']}@{config['host']}:{config['port']}/{config['database']}"
+
+
+jjtg_uri = crate_database_uri(DB_CONFIG["jjtg"])
+
+
+def unpivot_dataframe(df: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    数据透视表转置
+    """
+    return df.unpivot(
+        index=["TICKER_SYMBOL", "START_DATE", "END_DATE"],
+        variable_name="INDICATOR",
+        value_name="PORTFOLIO_VALUE",
+        on=[
+            "CUM_RETURN",
+            "ANNUAL_RETURN",
+            "ANNUAL_VOLATILITY",
+            "SHARP_RATIO_ANNUAL",
+            "CALMAR_RATIO_ANNUAL",
+            "MAXDD",
+        ],
+    )
+
+
+def get_portfolio_performance(
+    portfolio_name: str,
+    end_date: str,
+    table_name: str,
+) -> pl.LazyFrame:
+    query_sql = f"""
+    SELECT
+        a.TICKER_SYMBOL,
+        a.START_DATE,
+        a.END_DATE,
+        a.CUM_RETURN,
+        a.ANNUAL_RETURN,
+        a.ANNUAL_VOLATILITY,
+        a.SHARP_RATIO_ANNUAL,
+        a.CALMAR_RATIO_ANNUAL,
+        a.MAXDD
+    FROM
+        {table_name} a
+    WHERE
+        1 = 1
+        AND a.END_DATE = '{end_date}'
+        AND a.TICKER_SYMBOL = '{portfolio_name}'
+    """
+    return pl.read_database_uri(query_sql, uri=jjtg_uri).lazy().pipe(unpivot_dataframe)
+
+
+def get_peer_fund_performance(
+    portfolio_name: str,
+    end_date: str,
+) -> pl.LazyFrame:
     peer_query = (
-        get_portfolio_info()
+        dm.get_portfolio_info()
         .query(f"PORTFOLIO_NAME == '{portfolio_name}'")["PEER_QUERY"]
         .values[0]
     )
     peer_query = peer_query.replace("LEVEL", "c.LEVEL")
     peer_query = peer_query.replace("==", "=")
     query_sql = f"""
-        WITH a AS (
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            FROM
-                portfolio_performance_inner a
-                JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                AND a.END_DATE = b.END_DATE 
-            WHERE
-                1 = 1 
-                AND a.END_DATE = '{end_date}' 
-                AND ( a.TICKER_SYMBOL = b.PORTFOLIO_NAME OR b.PORTFOLIO_NAME = 'ALL' ) 
-                AND a.TICKER_SYMBOL = '{portfolio_name}' UNION
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            FROM
-                fund_performance_inner a
-                JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                AND a.END_DATE = b.END_DATE
-                JOIN fund_type_own c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
-
-            WHERE
-                1 = 1 
-                and {peer_query}
-                AND a.END_DATE = '{end_date}' 
-                AND ( b.PORTFOLIO_NAME = '{portfolio_name}' OR b.PORTFOLIO_NAME = 'ALL' ) 
-            AND ( 
-                c.REPORT_DATE = ( 
-                    SELECT max( report_date ) 
-                    FROM fund_type_own 
-                    WHERE PUBLISH_DATE <= '{end_date}' 
-                )
-                )),
-            b AS ( SELECT DATE_NAME, count(*) AS NUM FROM a GROUP BY DATE_NAME ) SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '累计收益率' AS INDICATOR,
-            CUM_RETURN AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化收益率' AS INDICATOR,
-            ANNUAL_RETURN AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化波动率' AS INDICATOR,
-            ANNUAL_VOLATILITY AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '最大回撤' AS INDICATOR,
-            MAXDD AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '收益波动比' AS INDICATOR,
-            SHARP_RATIO_ANNUAL AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化收益回撤比' AS INDICATOR,
-            CALMAR_RATIO_ANNUAL AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME
+    SELECT
+        a.TICKER_SYMBOL,
+        a.START_DATE,
+        a.END_DATE,
+        a.CUM_RETURN,
+        a.ANNUAL_RETURN,
+        a.ANNUAL_VOLATILITY,
+        a.SHARP_RATIO_ANNUAL,
+        a.CALMAR_RATIO_ANNUAL,
+        a.MAXDD 
+    FROM
+        fund_performance_inner a
+        JOIN fund_type_own c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
+    WHERE
+        1 = 1 
+        and {peer_query}
+        AND a.END_DATE = '{end_date}' 
+        AND ( 
+            c.REPORT_DATE = ( 
+                SELECT max( report_date ) 
+                FROM fund_type_own 
+                WHERE PUBLISH_DATE <= '{end_date}' 
+            )
+        )
     """
-    return DB_CONN_JJTG_DATA.exec_query(query_sql)
+    return pl.read_database_uri(query_sql, uri=jjtg_uri).lazy().pipe(unpivot_dataframe)
 
 
-def get_portfolio_derivatives_rank(portfolio_name: str, end_date: str) -> pd.DataFrame:
-    peer_query = (
-        get_portfolio_info()
-        .query(f"PORTFOLIO_NAME == '{portfolio_name}'")["PEER_QUERY"]
-        .values[0]
-    )
-    peer_query = peer_query.replace("LEVEL", "c.LEVEL")
-    peer_query = peer_query.replace("==", "=")
+def get_peer_fof_performance(
+    portfolio_name: str,
+    end_date: str,
+) -> pl.LazyFrame:
     query_sql = f"""
-        WITH a AS (
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            FROM
-                portfolio_derivatives_performance_inner a
-                JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                AND a.END_DATE = b.END_DATE 
-            WHERE
-                1 = 1 
-                AND a.END_DATE = '{end_date}' 
-                AND ( a.TICKER_SYMBOL = b.PORTFOLIO_NAME OR b.PORTFOLIO_NAME = 'ALL' ) 
-                AND a.TICKER_SYMBOL = '{portfolio_name}' UNION
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            FROM
-                fund_performance_inner a
-                JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                AND a.END_DATE = b.END_DATE
-                JOIN fund_type_own c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
-
-            WHERE
-                1 = 1 
-                and {peer_query}
-                AND a.END_DATE = '{end_date}' 
-                AND ( b.PORTFOLIO_NAME = '{portfolio_name}' OR b.PORTFOLIO_NAME = 'ALL' ) 
-            AND ( 
-                c.REPORT_DATE = ( 
-                    SELECT max( report_date ) 
-                    FROM fund_type_own 
-                    WHERE PUBLISH_DATE <= '{end_date}' 
-                )
-                )),
-            b AS ( SELECT DATE_NAME, count(*) AS NUM FROM a GROUP BY DATE_NAME ) SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '累计收益率' AS INDICATOR,
-            CUM_RETURN AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化收益率' AS INDICATOR,
-            ANNUAL_RETURN AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化波动率' AS INDICATOR,
-            ANNUAL_VOLATILITY AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '最大回撤' AS INDICATOR,
-            MAXDD AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '收益波动比' AS INDICATOR,
-            SHARP_RATIO_ANNUAL AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化收益回撤比' AS INDICATOR,
-            CALMAR_RATIO_ANNUAL AS PORTFOLIO_VALUE,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC )* 100 AS PEER_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME
+    SELECT
+        a.TICKER_SYMBOL,
+        a.START_DATE,
+        a.END_DATE,
+        a.CUM_RETURN,
+        a.ANNUAL_RETURN,
+        a.ANNUAL_VOLATILITY,
+        a.SHARP_RATIO_ANNUAL,
+        a.CALMAR_RATIO_ANNUAL,
+        a.MAXDD 
+    FROM
+        fund_performance_inner a
+        JOIN fof_type c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL 
+    WHERE
+        1 = 1 
+        AND a.END_DATE = '{end_date}' 
+        AND c.INNER_TYPE = '{portfolio_name}' 
     """
-    df = DB_CONN_JJTG_DATA.exec_query(query_sql).query(
-        f"TICKER_SYMBOL == '{portfolio_name}'"
+    return pl.read_database_uri(query_sql, uri=jjtg_uri).lazy().pipe(unpivot_dataframe)
+
+
+def get_peer_portfolio_performance(
+    portfolio_name: str,
+    end_date: str,
+):
+    query_sql = f"""
+    SELECT
+        a.TICKER_SYMBOL,
+        a.START_DATE,
+        a.END_DATE,
+        a.CUM_RETURN,
+        a.ANNUAL_RETURN,
+        a.ANNUAL_VOLATILITY,
+        a.SHARP_RATIO_ANNUAL,
+        a.CALMAR_RATIO_ANNUAL,
+        a.MAXDD 
+    FROM
+        peer_performance_inner a
+        JOIN peer_portfolio_type c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL 
+    WHERE
+        1 = 1 
+        AND a.END_DATE = '{end_date}' 
+        AND c.PORTFOLIO_TYPE = '{portfolio_name}'
+    """
+    return pl.read_database_uri(query_sql, uri=jjtg_uri).lazy().pipe(unpivot_dataframe)
+
+
+def get_benchmark_value_outter(portfolio_name: str, end_date: str) -> pl.lazyframe:
+    query = f"""
+    SELECT
+        a.TICKER_SYMBOL,
+        a.START_DATE,
+        a.END_DATE,
+        a.CUM_RETURN,
+        a.ANNUAL_RETURN,
+        a.ANNUAL_VOLATILITY,
+        a.SHARP_RATIO_ANNUAL,
+        a.CALMAR_RATIO_ANNUAL,
+        a.MAXDD 
+    FROM
+        benchmark_performance_inner a
+    WHERE
+        1 = 1 
+        AND a.END_DATE = '{end_date}' 
+        AND a.TICKER_SYMBOL = '{portfolio_name}' 
+    """
+    df = pl.read_database_uri(query, uri=jjtg_uri).lazy()
+    df_unpivot = df.unpivot(
+        index=["TICKER_SYMBOL", "START_DATE", "END_DATE"],
+        variable_name="INDICATOR",
+        value_name="BENCHMARK_VALUE_OUTTER",
+    )
+    return df_unpivot
+
+
+def rank_pct(
+    rank_col: str, patition_by: str | list = None, descending: bool = True
+) -> pl.Expr:
+    rank_expr = pl.col(rank_col).rank(descending=descending).cast(pl.UInt32)
+    count_expr = pl.col(rank_col).count().cast(pl.UInt32)
+    return 100 * ((rank_expr - 1) / (count_expr - 1)).over(patition_by)
+
+
+def rank_str(
+    rank_col: str, patition_by: str | list = None, descending: bool = True
+) -> pl.Expr:
+    rank_expr = pl.col(rank_col).rank(descending=descending).cast(pl.UInt32)
+    count_expr = pl.col(rank_col).count().cast(pl.UInt32)
+    return (
+        rank_expr.cast(pl.String).over(patition_by)
+        + "/"
+        + count_expr.cast(pl.String).over(patition_by)
     )
 
-    benchmark_df = get_benchmark_value_outter(
-        portfolio_name=portfolio_name, end_date=end_date
+
+def _cal_performance_rank_helper(
+    df_unpivot: pl.LazyFrame,
+    patition_by: str | list = None,
+    incicator_list: list = None,
+    descending: bool = True,
+) -> pl.LazyFrame:
+    # 计算排名及百分位
+    # 特别注意在polars中rank函数不考虑空值
+    result_df = (
+        df_unpivot.select(
+            [
+                pl.col("TICKER_SYMBOL"),
+                pl.col("START_DATE"),
+                pl.col("END_DATE"),
+                pl.col("INDICATOR"),
+                pl.col("PORTFOLIO_VALUE"),
+            ]
+        )
+        .filter(pl.col("INDICATOR").is_in(incicator_list))
+        .with_columns(
+            rank_pct(
+                "PORTFOLIO_VALUE", patition_by=patition_by, descending=descending
+            ).alias("PEER_RANK_PCT"),
+            rank_str(
+                "PORTFOLIO_VALUE", patition_by=patition_by, descending=descending
+            ).alias("PEER_RANK"),
+        )
     )
-    benchmark_df.rename(
-        columns={"BENCHMARK_VALUE_OUTTER": "BENCHMARK_VALUE_INNER"}, inplace=True
+
+    return result_df
+
+
+def cal_performance_rank(df: pl.LazyFrame, portfolio_name: str) -> pl.LazyFrame:
+    # df_unpivot = df.unpivot(
+    #     index=["TICKER_SYMBOL", "START_DATE", "END_DATE"],
+    #     variable_name="INDICATOR",
+    #     value_name="PORTFOLIO_VALUE",
+    # )
+    asscending_indicators = ["MAXDD", "ANNUAL_VOLATILITY"]
+    descending_indicators = [
+        "CUM_RETURN",
+        "ANNUAL_RETURN",
+        "SHARP_RATIO_ANNUAL",
+        "CALMAR_RATIO_ANNUAL",
+    ]
+    patition_by = ["START_DATE", "END_DATE", "INDICATOR"]
+    # 计算排名及百分位
+    # 特别注意在polars中rank函数不考虑空值
+    df_asscending = _cal_performance_rank_helper(
+        df,
+        patition_by=patition_by,
+        incicator_list=asscending_indicators,
+        descending=False,
     )
-    return df.merge(
+
+    df_descending = _cal_performance_rank_helper(
+        df,
+        patition_by=patition_by,
+        incicator_list=descending_indicators,
+        descending=True,
+    )
+    result = pl.concat([df_asscending, df_descending]).filter(
+        pl.col("TICKER_SYMBOL") == portfolio_name
+    )
+    return result
+
+
+def get_portfolio_dates(portfolio_name: str, end_date: str) -> pl.LazyFrame:
+    query_sql = f"""
+    SELECT
+        DATE_NAME AS CYCLE,
+        START_DATE,
+        END_DATE 
+    FROM
+        portfolio_dates 
+    WHERE
+        1 = 1 
+        AND (PORTFOLIO_NAME = '{portfolio_name}' OR PORTFOLIO_NAME = 'ALL') 
+        AND END_DATE = '{end_date}'
+    """
+    return pl.read_database_uri(query_sql, uri=jjtg_uri).lazy()
+
+
+def rename_indicator_col_into_chinese(df: pl.LazyFrame):
+    indicator_map_dict = {
+        "CUM_RETURN": "累计收益率",
+        "ANNUAL_RETURN": "年化收益率",
+        "ANNUAL_VOLATILITY": "年化波动率",
+        "SHARP_RATIO_ANNUAL": "收益波动比",
+        "CALMAR_RATIO_ANNUAL": "年化收益回撤比",
+        "MAXDD": "最大回撤",
+    }
+    return df.with_columns(
+        pl.col("INDICATOR").replace(indicator_map_dict).alias("INDICATOR")
+    )
+
+
+def add_benchmark_value_otter(
+    df: pl.LazyFrame, portfolio_name: str, end_date: str
+) -> pl.LazyFrame:
+    benchmark_df = get_benchmark_value_outter(portfolio_name, end_date)
+    # print("benchmark_df", benchmark_df.collect())
+    result = df.join(
         benchmark_df,
-        how="left",
-        on=["DATE_NAME", "TICKER_SYMBOL", "START_DATE", "END_DATE", "INDICATOR"],
-    )
-
-
-def get_fof_rank(portfolio_name: str, end_date: str) -> pd.DataFrame:
-    query_sql = f"""
-        WITH a AS (
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            FROM
-                portfolio_performance_inner a
-                JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                AND a.END_DATE = b.END_DATE 
-            WHERE
-                1 = 1 
-                AND a.END_DATE = '{end_date}' 
-                AND ( a.TICKER_SYMBOL = b.PORTFOLIO_NAME OR b.PORTFOLIO_NAME = 'ALL' ) 
-                AND a.TICKER_SYMBOL = '{portfolio_name}' UNION
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            FROM
-                fund_performance_inner a
-                JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                AND a.END_DATE = b.END_DATE
-                JOIN fof_type c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL 
-            WHERE
-                1 = 1 
-                AND a.END_DATE = '{end_date}' 
-                AND c.INNER_TYPE = '{portfolio_name}' 
-                AND ( b.PORTFOLIO_NAME = '{portfolio_name}' OR b.PORTFOLIO_NAME = 'ALL' ) 
-           ),
-            b AS ( SELECT DATE_NAME, count(*) AS NUM FROM a GROUP BY DATE_NAME ) SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '累计收益率' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC ), '/', b.NUM ) AS PEER_FOF_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC )* 100 AS PEER_FOF_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化收益率' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC ), '/', b.NUM ) AS PEER_FOF_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC )* 100 AS PEER_FOF_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-             '年化波动率' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY ), '/', b.NUM ) AS PEER_FOF_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY )* 100 AS PEER_FOF_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '最大回撤' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD ), '/', b.NUM ) AS PEER_FOF_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD )* 100 AS PEER_FOF_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-              '收益波动比' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_FOF_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC )* 100 AS PEER_FOF_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-              '年化收益回撤比' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_FOF_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC )* 100 AS PEER_FOF_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME
-    """
-    return DB_CONN_JJTG_DATA.exec_query(query_sql)
-
-
-def get_peer_rank(portfolio_name: str, end_date: str) -> pd.DataFrame:
-    query_sql = f"""
-        WITH a AS (
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            FROM
-                portfolio_performance_inner a
-                JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                AND a.END_DATE = b.END_DATE 
-            WHERE
-                1 = 1 
-                AND a.END_DATE = '{end_date}' 
-                AND ( a.TICKER_SYMBOL = b.PORTFOLIO_NAME OR b.PORTFOLIO_NAME = 'ALL' ) 
-                AND a.TICKER_SYMBOL = '{portfolio_name}' UNION
-            SELECT
-                b.DATE_NAME,
-                a.TICKER_SYMBOL,
-                a.START_DATE,
-                a.END_DATE,
-                a.CUM_RETURN,
-                a.ANNUAL_RETURN,
-                a.ANNUAL_VOLATILITY,
-                a.SHARP_RATIO_ANNUAL,
-                a.CALMAR_RATIO_ANNUAL,
-                a.MAXDD 
-            	FROM
-                    peer_performance_inner a
-                    JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-                    AND a.END_DATE = b.END_DATE
-                    JOIN peer_portfolio_type c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL 
-                WHERE
-                    1 = 1 
-                    AND a.END_DATE = '{end_date}' 
-                    AND c.PORTFOLIO_TYPE = '{portfolio_name}'
-                    AND ( b.PORTFOLIO_NAME = '{portfolio_name}' OR b.PORTFOLIO_NAME = 'ALL' ) 
-           ),
-            b AS ( SELECT DATE_NAME, count(*) AS NUM FROM a GROUP BY DATE_NAME ) SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '累计收益率' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC ), '/', b.NUM ) AS PEER_PORTFOLIO_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CUM_RETURN DESC )* 100 AS PEER_PORTFOLIO_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '年化收益率' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC ), '/', b.NUM ) AS PEER_PORTFOLIO_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_RETURN DESC )* 100 AS PEER_PORTFOLIO_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-             '年化波动率' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY ), '/', b.NUM ) AS PEER_PORTFOLIO_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY ANNUAL_VOLATILITY )* 100 AS PEER_PORTFOLIO_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            '最大回撤' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD ), '/', b.NUM ) AS PEER_PORTFOLIO_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY MAXDD )* 100 AS PEER_PORTFOLIO_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-              '收益波动比' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_PORTFOLIO_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY SHARP_RATIO_ANNUAL DESC )* 100 AS PEER_PORTFOLIO_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME UNION
-        SELECT
-            a.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-              '年化收益回撤比' AS INDICATOR,
-            CONCAT( ROW_NUMBER() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC ), '/', b.NUM ) AS PEER_PORTFOLIO_RANK,
-            PERCENT_RANK() over ( PARTITION BY a.DATE_NAME ORDER BY CALMAR_RATIO_ANNUAL DESC )* 100 AS PEER_PORTFOLIO_RANK_PCT 
-        FROM
-            a
-            JOIN b ON b.DATE_NAME = a.DATE_NAME
-    """
-    return DB_CONN_JJTG_DATA.exec_query(query_sql)
-
-
-def get_benchmark_value_outter(portfolio_name: str, end_date: str) -> pd.DataFrame:
-    query_sql = f"""
-    WITH a AS (
-        SELECT
-            b.DATE_NAME,
-            a.TICKER_SYMBOL,
-            a.START_DATE,
-            a.END_DATE,
-            a.CUM_RETURN,
-            a.ANNUAL_RETURN,
-            a.ANNUAL_VOLATILITY,
-            a.SHARP_RATIO_ANNUAL,
-            a.CALMAR_RATIO_ANNUAL,
-            a.MAXDD 
-        FROM
-            benchmark_performance_inner a
-            JOIN portfolio_dates b ON a.START_DATE = b.START_DATE 
-            AND a.END_DATE = b.END_DATE 
-        WHERE
-            1 = 1 
-            AND a.END_DATE = '{end_date}' 
-            AND ( a.TICKER_SYMBOL = b.PORTFOLIO_NAME OR b.PORTFOLIO_NAME = 'ALL' ) 
-            AND a.TICKER_SYMBOL = '{portfolio_name}' 
-        ) SELECT
-        a.DATE_NAME,
-        a.TICKER_SYMBOL,
-        a.START_DATE,
-        a.END_DATE,
-        '累计收益率' AS INDICATOR,
-        CUM_RETURN AS BENCHMARK_VALUE_OUTTER 
-    FROM
-        a UNION
-    SELECT
-        a.DATE_NAME,
-        a.TICKER_SYMBOL,
-        a.START_DATE,
-        a.END_DATE,
-        '年化收益率' AS INDICATOR,
-        ANNUAL_RETURN AS BENCHMARK_VALUE_OUTTER 
-    FROM
-        a UNION
-    SELECT
-        a.DATE_NAME,
-        a.TICKER_SYMBOL,
-        a.START_DATE,
-        a.END_DATE,
-        '年化波动率' AS INDICATOR,
-        ANNUAL_VOLATILITY AS BENCHMARK_VALUE_OUTTER 
-    FROM
-        a UNION
-    SELECT
-        a.DATE_NAME,
-        a.TICKER_SYMBOL,
-        a.START_DATE,
-        a.END_DATE,
-        '最大回撤' AS INDICATOR,
-        MAXDD AS BENCHMARK_VALUE_OUTTER 
-    FROM
-        a UNION
-    SELECT
-        a.DATE_NAME,
-        a.TICKER_SYMBOL,
-        a.START_DATE,
-        a.END_DATE,
-        '收益波动比' AS INDICATOR,
-        SHARP_RATIO_ANNUAL AS BENCHMARK_VALUE_OUTTER 
-    FROM
-        a UNION
-    SELECT
-        a.DATE_NAME,
-        a.TICKER_SYMBOL,
-        a.START_DATE,
-        a.END_DATE,
-        '年化收益回撤比' AS INDICATOR,
-        CALMAR_RATIO_ANNUAL AS BENCHMARK_VALUE_OUTTER 
-    FROM
-        a
-    """
-    return DB_CONN_JJTG_DATA.exec_query(query_sql)
-
-
-def get_portfolio_performance(portfolio_name: str, end_date: str) -> pd.DataFrame:
-    """
-    获取组合表现
-
-    Parameters
-    ----------
-    portfolio_name : str
-        组合名称
-    end_date : str
-        日期
-
-    Returns
-    -------
-    pd.DataFrame
-        _description_
-    """
-    # print(portfolio_name, end_date)
-    portfolio_rank = get_portfolio_rank(
-        portfolio_name=portfolio_name, end_date=end_date
-    )
-    portfolio_peer_median = (
-        portfolio_rank.groupby(by=["DATE_NAME", "INDICATOR"])["PORTFOLIO_VALUE"]
-        .median()
-        .reset_index()
-        .rename(columns={"PORTFOLIO_VALUE": "PEER_MEDIAN"})
-    )
-    portfolio_rank = portfolio_rank.query(f"TICKER_SYMBOL == '{portfolio_name}'")
-    portfolio_rank = portfolio_rank.merge(
-        portfolio_peer_median, on=["DATE_NAME", "INDICATOR"], how="left"
-    )
-
-    fof_rank = (
-        get_fof_rank(portfolio_name=portfolio_name, end_date=end_date).query(
-            f"TICKER_SYMBOL == '{portfolio_name}'"
-        )
-    )[["DATE_NAME", "INDICATOR", "PEER_FOF_RANK", "PEER_FOF_RANK_PCT"]]
-    portfolio_rank = portfolio_rank.merge(
-        fof_rank, on=["DATE_NAME", "INDICATOR"], how="left"
-    )
-
-    peer_rank = (
-        get_peer_rank(portfolio_name=portfolio_name, end_date=end_date).query(
-            f"TICKER_SYMBOL == '{portfolio_name}'"
-        )
-    )[["DATE_NAME", "INDICATOR", "PEER_PORTFOLIO_RANK", "PEER_PORTFOLIO_RANK_PCT"]]
-    portfolio_rank = portfolio_rank.merge(
-        peer_rank, on=["DATE_NAME", "INDICATOR"], how="left"
-    )
-
-    benchmark_outter = get_benchmark_value_outter(
-        portfolio_name=portfolio_name, end_date=end_date
-    )[["DATE_NAME", "INDICATOR", "START_DATE", "END_DATE", "BENCHMARK_VALUE_OUTTER"]]
-    portfolio_rank = portfolio_rank.merge(
-        benchmark_outter,
-        on=["START_DATE", "END_DATE", "INDICATOR", "DATE_NAME"],
+        on=["TICKER_SYMBOL", "START_DATE", "END_DATE", "INDICATOR"],
         how="left",
     )
+    # print("result", result.collect())
+    return result
 
-    return portfolio_rank
+
+def add_peer_fof_performance(
+    df: pl.LazyFrame, portfolio_name: str, end_date: str
+) -> pl.LazyFrame:
+    peer_fof = get_peer_fof_performance(portfolio_name, end_date)
+    result = cal_performance_rank(pl.concat([df, peer_fof]), portfolio_name)
+    result = result.rename(
+        {"PEER_RANK_PCT": "PEER_FOF_RANK_PCT", "PEER_RANK": "PEER_FOF_RANK"}
+    )
+    result = result.select(
+        [
+            "TICKER_SYMBOL",
+            "START_DATE",
+            "END_DATE",
+            "INDICATOR",
+            "PEER_FOF_RANK_PCT",
+            "PEER_FOF_RANK",
+        ]
+    )
+    return df.join(
+        result, on=["TICKER_SYMBOL", "START_DATE", "END_DATE", "INDICATOR"], how="left"
+    )
+
+
+def add_peer_portfolio_performance(
+    df: pl.LazyFrame, portfolio_name: str, end_date: str
+) -> pl.LazyFrame:
+    peer_portfolio = get_peer_portfolio_performance(portfolio_name, end_date)
+    result = cal_performance_rank(pl.concat([df, peer_portfolio]), portfolio_name)
+    result = result.rename(
+        {"PEER_RANK_PCT": "PEER_PORTFOLIO_RANK_PCT", "PEER_RANK": "PEER_PORTFOLIO_RANK"}
+    )
+    result = result.select(
+        [
+            "TICKER_SYMBOL",
+            "START_DATE",
+            "END_DATE",
+            "INDICATOR",
+            "PEER_PORTFOLIO_RANK_PCT",
+            "PEER_PORTFOLIO_RANK",
+        ]
+    )
+    return df.join(
+        result, on=["TICKER_SYMBOL", "START_DATE", "END_DATE", "INDICATOR"], how="left"
+    )
+
+
+def cal_peer_median(peer_fund_performance: pl.LazyFrame) -> pl.LazyFrame:
+    peer_median = peer_fund_performance.group_by(
+        ["START_DATE", "END_DATE", "INDICATOR"]
+    ).agg(pl.col("PORTFOLIO_VALUE").median().alias("PEER_MEDIAN"))
+    return peer_median
+
+
+def _cal_portfolio_performance(
+    portfolio_name: str, end_date: str, table_name: str
+) -> pl.LazyFrame:
+    portfolio_perf = get_portfolio_performance(portfolio_name, end_date, table_name)
+
+    # print("portfolio_perf", portfolio_perf.collect())
+    peer_fund_performance = get_peer_fund_performance(portfolio_name, end_date)
+
+    peer_median = cal_peer_median(peer_fund_performance)
+
+    df = pl.concat([portfolio_perf, peer_fund_performance])
+    perf_rank = cal_performance_rank(df, portfolio_name).join(
+        peer_median, on=["START_DATE", "END_DATE", "INDICATOR"], how="left"
+    )
+    # perf_rank = portfolio_dates.join(
+    #     perf_rank,
+    #     on=["START_DATE", "END_DATE"]
+    # )
+    # print("perf_rank", perf_rank.collect())
+    return perf_rank
+
+
+def get_portfolio_derivatives_rank(portfolio_name: str, end_date: str):
+    portfolio_dates = get_portfolio_dates(portfolio_name, end_date)
+    perf_rank = _cal_portfolio_performance(
+        portfolio_name, end_date, "portfolio_derivatives_performance_inner"
+    )
+    perf_rank = (
+        perf_rank.pipe(add_benchmark_value_otter, portfolio_name, end_date)
+        .rename({"BENCHMARK_VALUE_OUTTER": "BENCHMARK_VALUE_INNER"})
+        .pipe(rename_indicator_col_into_chinese)
+    )
+    return portfolio_dates.join(perf_rank, on=["START_DATE", "END_DATE"])
+
+
+def get_portfolio_rank(portfolio_name: str, end_date: str):
+    portfolio_dates = get_portfolio_dates(portfolio_name, end_date)
+    perf_rank = _cal_portfolio_performance(
+        portfolio_name, end_date, "portfolio_performance_inner"
+    )
+    perf_rank = (
+        perf_rank.pipe(add_benchmark_value_otter, portfolio_name, end_date)
+        .pipe(add_peer_fof_performance, portfolio_name, end_date)
+        .pipe(add_peer_portfolio_performance, portfolio_name, end_date)
+        .pipe(rename_indicator_col_into_chinese)
+    )
+    return portfolio_dates.join(perf_rank, on=["START_DATE", "END_DATE"])
 
 
 def update_portfolio_performance(
@@ -704,7 +452,7 @@ def update_portfolio_performance(
         lambda x: x.strftime(DATE_FORMAT)
     )
 
-    for date in trade_dates:
+    for date in trade_dates[0:1]:
         # print(date)
         # 写入自己计算的组合
         portfolio_names = portfolio_info.query(f"LISTED_DATE < '{date}'")[
@@ -713,40 +461,25 @@ def update_portfolio_performance(
 
         if portfolio_name_list is not None:
             portfolio_names = list(set(portfolio_names) & set(portfolio_name_list))
-        with ProcessPoolExecutor() as executor:
-            result_list = list(
-                tqdm(
-                    executor.map(
-                        get_portfolio_derivatives_rank,
-                        portfolio_names,
-                        [date] * len(portfolio_names),
-                    ),
-                    total=len(portfolio_names),
-                )
+        for portfolio_name in portfolio_names[0:1]:
+            portfolio_derivatives_rank = (
+                get_portfolio_derivatives_rank(portfolio_name, date)
+                .collect()
+                .to_pandas()
             )
-        result_df = pd.concat(result_list)
-        result_df.rename(columns={"DATE_NAME": "CYCLE"}, inplace=True)
-        DB_CONN_JJTG_DATA.upsert(result_df, "portfolio_derivatives_performance")
-
-        # 写入正式组合
-        portfolio_names = portfolio_info.query(
-            f"LISTED_DATE < '{date}' and IF_LISTED == 1 and PORTFOLIO_TYPE != '目标盈'"
-        )["PORTFOLIO_NAME"].tolist()
-
-        with ProcessPoolExecutor() as executor:
-            result_list = list(
-                tqdm(
-                    executor.map(
-                        get_portfolio_performance,
-                        portfolio_names,
-                        [date] * len(portfolio_names),
-                    ),
-                    total=len(portfolio_names),
-                )
+            DB_CONN_JJTG_DATA.upsert(
+                portfolio_derivatives_rank,
+                table="portfolio_derivatives_performance",
             )
-        result_df = pd.concat(result_list)
-        result_df.rename(columns={"DATE_NAME": "CYCLE"}, inplace=True)
-        DB_CONN_JJTG_DATA.upsert(result_df, "portfolio_performance")
+            print(f"{date}-{portfolio_name}衍生指标写入完成")
+            portfolio_rank = (
+                get_portfolio_rank(portfolio_name, date).collect().to_pandas()
+            )
+            DB_CONN_JJTG_DATA.upsert(
+                portfolio_rank,
+                table="portfolio_performance",
+            )
+            print(f"{date}-{portfolio_name}正式组合指标写入完成")
 
 
 def query_portfolio_performance(trade_dt: str):
@@ -799,20 +532,20 @@ if __name__ == "__main__":
         start_date=start_date,
         end_date=end_date,
     )
-    # 如果当前时间大于10点，则发送邮件
-    if 11 <= hour <= 15 and dm.if_trade_dt(TODAY):
-        portfolio_performance = query_portfolio_performance(end_date)
-        file_path = f"f:/BaiduNetdiskWorkspace/1-基金投研/2.1-监控/2-定时数据/组合监控数据/组合监控数据{end_date}.xlsx"
-        portfolio_nav = query_portfolio_nav()
-        with pd.ExcelWriter(file_path, engine="xlsxwriter") as writer:
-            portfolio_performance.to_excel(writer, sheet_name="绩效表现")
-            portfolio_nav.to_excel(writer, sheet_name="组合净值")
+    # # 如果当前时间大于10点，则发送邮件
+    # if 11 <= hour <= 15 and dm.if_trade_dt(TODAY):
+    #     portfolio_performance = query_portfolio_performance(end_date)
+    #     file_path = f"f:/BaiduNetdiskWorkspace/1-基金投研/2.1-监控/2-定时数据/组合监控数据/组合监控数据{end_date}.xlsx"
+    #     portfolio_nav = query_portfolio_nav()
+    #     with pd.ExcelWriter(file_path, engine="xlsxwriter") as writer:
+    #         portfolio_performance.to_excel(writer, sheet_name="绩效表现")
+    #         portfolio_nav.to_excel(writer, sheet_name="组合净值")
 
-        mail_sender = MailSender()
-        mail_sender.message_config(
-            from_name="进化中的ChenGPT_0.1",
-            subject=f"【每日监控】投顾组合数据监控{end_date}",
-            file_path=file_path,
-            content="详情请见附件",
-        )
-        mail_sender.send_mail()
+    #     mail_sender = MailSender()
+    #     mail_sender.message_config(
+    #         from_name="进化中的ChenGPT_0.1",
+    #         subject=f"【每日监控】投顾组合数据监控{end_date}",
+    #         file_path=file_path,
+    #         content="详情请见附件",
+    #     )
+    #     mail_sender.send_mail()
