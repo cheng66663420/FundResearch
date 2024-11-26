@@ -1,19 +1,20 @@
 import datetime
 
-import feather
+
 import numpy as np
 import pandas as pd
+import polars as pl
+from dateutil.parser import parse
 from joblib import Parallel, delayed
 from tqdm import tqdm
-import polars as pl
-from quant_pl.performance_pl import PerformancePL
-from dateutil.parser import parse
+
 import quant_utils.data_moudle as dm
 from fund_db.fund_db_updates import update_fund_performance_rank
+from quant_pl.performance_pl import PerformancePL
 from quant_utils.constant_varialbles import LAST_TRADE_DT
 from quant_utils.db_conn import DB_CONN_JJTG_DATA, DB_CONN_JY_LOCAL
 from quant_utils.performance import Performance
-from quant_utils.utils import yield_split_list
+
 
 INIT_DATE = "20210903"
 
@@ -281,7 +282,7 @@ class BasePerformance:
             )
         time_stamp_nav = datetime.datetime.now()
         print(f"净值处理完成, 用时{time_stamp_nav - time_stamp2}")
-        update_desc_flag = 0
+        # update_desc_flag = 0
         result_list = []
         for idx, (start_date, end_date) in dates_df.iterrows():
             perf = PerformancePL(df_nav_temp, start_date=start_date, end_date=end_date)
@@ -292,7 +293,7 @@ class BasePerformance:
         if all(i is None for i in result_list):
             tqdm.write("结果都是None")
             # tqdm.write("=*" * 30)
-            update_desc_flag = 0
+            # update_desc_flag = 0
         else:
             result = pd.concat(result_list)
             time_stamp3 = datetime.datetime.now()

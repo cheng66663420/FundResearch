@@ -348,6 +348,7 @@ def update_jy_db():
         "index_tagtype",
         "qt_osindexquote",
         "qt_goldtrademarket",
+        "mf_fundtagchange",
     ]
 
     for table in jy_tables:
