@@ -43,7 +43,17 @@ JJTF_URI = crate_database_uri("mysql", DB_CONFIG["jjtg"])
 
 def unpivot_dataframe(df: pl.LazyFrame) -> pl.LazyFrame:
     """
-    数据透视表转置
+    数据透视
+
+    Parameters
+    ----------
+    df : pl.LazyFrame
+        需要传入的LazyFrame数据
+
+    Returns
+    -------
+    pl.LazyFrame
+        透视后的LazyFrame数据
     """
     return df.unpivot(
         index=["TICKER_SYMBOL", "PORTFOLIO_NAME", "START_DATE", "END_DATE"],
@@ -64,6 +74,21 @@ def get_portfolio_performance(
     end_date: str,
     table_name: str,
 ) -> pl.LazyFrame:
+    """
+    获取组合业绩
+
+    Parameters
+    ----------
+    end_date : str
+        结束日期
+    table_name : str
+        表名
+
+    Returns
+    -------
+    pl.LazyFrame
+        组合业绩
+    """
     query_sql = f"""
     SELECT
         TICKER_SYMBOL,
@@ -88,6 +113,20 @@ def get_portfolio_performance(
 def get_peer_fund_performance(
     end_date: str,
 ) -> pl.LazyFrame:
+    """
+    获取同类基金业绩
+
+    Parameters
+    ----------
+    end_date : str
+        结束日期
+
+    Returns
+    -------
+    pl.LazyFrame
+        同类基金业绩
+
+    """
     peer_query_df = dm.get_portfolio_info()[["PORTFOLIO_NAME", "PEER_QUERY"]]
     query_sql = f"""
         SELECT
@@ -152,6 +191,19 @@ def get_peer_fund_performance(
 def get_peer_fof_performance(
     end_date: str,
 ) -> pl.LazyFrame:
+    """
+    获取同类FOF业绩
+
+    Parameters
+    ----------
+    end_date : str
+        结束日期
+
+    Returns
+    -------
+    pl.LazyFrame
+        同类FOF业绩
+    """
     query_sql = f"""
     SELECT
         a.TICKER_SYMBOL,
@@ -177,6 +229,20 @@ def get_peer_fof_performance(
 def get_peer_portfolio_performance(
     end_date: str,
 ) -> pl.LazyFrame:
+    """
+    获取同类组合业绩
+
+    Parameters
+    ----------
+    end_date : str
+        结束日期
+
+    Returns
+    -------
+    pl.LazyFrame
+        同类组合业绩
+
+    """
     query_sql = f"""
     SELECT
         a.TICKER_SYMBOL,
@@ -200,6 +266,19 @@ def get_peer_portfolio_performance(
 
 
 def get_benchmark_value_outter(end_date: str) -> pl.lazyframe:
+    """
+    获取基准业绩
+
+    Parameters
+    ----------
+    end_date : str
+
+    Returns
+    -------
+    pl.lazyframe
+        基准业绩
+
+    """
     query = f"""
     SELECT
         a.TICKER_SYMBOL,
@@ -218,17 +297,33 @@ def get_benchmark_value_outter(end_date: str) -> pl.lazyframe:
         AND a.END_DATE = '{end_date}'
     """
     df = pl.read_database_uri(query, uri=JJTF_URI).lazy()
-    df_unpivot = df.unpivot(
+    return df.unpivot(
         index=["TICKER_SYMBOL", "START_DATE", "END_DATE"],
         variable_name="INDICATOR",
         value_name="BENCHMARK_VALUE_OUTTER",
     )
-    return df_unpivot
 
 
 def rank_pct(
     rank_col: str, patition_by: str | list = None, descending: bool = True
 ) -> pl.Expr:
+    """
+    计算百分位排名
+
+    Parameters
+    ----------
+    rank_col : str
+        排名列
+    patition_by : str | list, optional
+        分组列, by default None
+    descending : bool, optional
+        是否降序, by default True
+
+    Returns
+    -------
+    pl.Expr
+        百分位排名
+    """
     rank_expr = pl.col(rank_col).rank(descending=descending).cast(pl.UInt32)
     count_expr = pl.col(rank_col).count().cast(pl.UInt32)
     return 100 * ((rank_expr - 1) / (count_expr - 1)).over(patition_by)
@@ -237,6 +332,23 @@ def rank_pct(
 def rank_str(
     rank_col: str, patition_by: str | list = None, descending: bool = True
 ) -> pl.Expr:
+    """
+    计算百分位排名
+
+    Parameters
+    ----------
+    rank_col : str
+        排名列
+    patition_by : str | list, optional
+        分组列, by default None
+    descending : bool, optional
+            是否降序, by default True
+
+    Returns
+    -------
+    pl.Expr
+        百分位排名
+    """
     rank_expr = pl.col(rank_col).rank(descending=descending).cast(pl.UInt32)
     count_expr = pl.col(rank_col).count().cast(pl.UInt32)
     return (
@@ -252,9 +364,27 @@ def _cal_performance_rank_helper(
     incicator_list: list = None,
     descending: bool = True,
 ) -> pl.LazyFrame:
-    # 计算排名及百分位
-    # 特别注意在polars中rank函数不考虑空值
-    result_df = (
+    """
+    计算业绩排名
+
+    Parameters
+    ----------
+    df : pl.LazyFrame
+        业绩数据
+    patition_by : str | list, optional
+        分组列, by default None
+    incicator_list : list, optional
+        业绩指标, by default None
+    descending : bool, optional
+        是否降序, by default True
+
+    Returns
+    -------
+    pl.LazyFrame
+        业绩排名数据
+
+    """
+    return (
         df.select(
             [
                 pl.col("TICKER_SYMBOL"),
@@ -268,18 +398,34 @@ def _cal_performance_rank_helper(
         .filter(pl.col("INDICATOR").is_in(incicator_list))
         .with_columns(
             rank_pct(
-                "PORTFOLIO_VALUE", patition_by=patition_by, descending=descending
+                "PORTFOLIO_VALUE",
+                patition_by=patition_by,
+                descending=descending,
             ).alias("PEER_RANK_PCT"),
             rank_str(
-                "PORTFOLIO_VALUE", patition_by=patition_by, descending=descending
+                "PORTFOLIO_VALUE",
+                patition_by=patition_by,
+                descending=descending,
             ).alias("PEER_RANK"),
         )
     )
 
-    return result_df
-
 
 def cal_performance_rank(df: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    计算业绩排名
+
+    Parameters
+    ----------
+    df : pl.LazyFrame
+        业绩数据
+
+    Returns
+    -------
+    pl.LazyFrame
+        业绩排名数据
+
+    """
     asscending_indicators = [
         "MAXDD",
         "ANNUAL_VOLATILITY",
@@ -311,10 +457,9 @@ def cal_performance_rank(df: pl.LazyFrame) -> pl.LazyFrame:
         incicator_list=descending_indicators,
         descending=True,
     )
-    result = pl.concat([df_asscending, df_descending]).filter(
+    return pl.concat([df_asscending, df_descending]).filter(
         pl.col("TICKER_SYMBOL") == pl.col("PORTFOLIO_NAME")
     )
-    return result
 
 
 def get_portfolio_dates(end_date: str) -> pl.LazyFrame:
@@ -349,13 +494,11 @@ def rename_indicator_col_into_chinese(df: pl.LazyFrame):
 
 def add_benchmark_value_otter(df: pl.LazyFrame, end_date: str) -> pl.LazyFrame:
     benchmark_df = get_benchmark_value_outter(end_date)
-    result = df.join(
+    return df.join(
         benchmark_df,
         on=["TICKER_SYMBOL", "START_DATE", "END_DATE", "INDICATOR"],
         how="left",
     )
-
-    return result
 
 
 def add_peer_fof_performance(df: pl.LazyFrame, end_date: str) -> pl.LazyFrame:
@@ -385,10 +528,9 @@ def add_peer_portfolio_performance(df: pl.LazyFrame, end_date: str) -> pl.LazyFr
 
 
 def cal_peer_median(peer_fund_performance: pl.LazyFrame) -> pl.LazyFrame:
-    peer_median = peer_fund_performance.group_by(
+    return peer_fund_performance.group_by(
         ["PORTFOLIO_NAME", "START_DATE", "END_DATE", "INDICATOR"]
     ).agg(pl.col("PORTFOLIO_VALUE").median().alias("PEER_MEDIAN"))
-    return peer_median
 
 
 def _cal_portfolio_performance(end_date: str, table_name: str) -> pl.LazyFrame:
@@ -399,15 +541,27 @@ def _cal_portfolio_performance(end_date: str, table_name: str) -> pl.LazyFrame:
     peer_median = cal_peer_median(peer_fund_performance)
 
     df = pl.concat([portfolio_perf, peer_fund_performance])
-    perf_rank = cal_performance_rank(df).join(
+    return cal_performance_rank(df).join(
         peer_median,
         on=["PORTFOLIO_NAME", "START_DATE", "END_DATE", "INDICATOR"],
         how="left",
     )
-    return perf_rank
 
 
-def get_portfolio_derivatives_rank(end_date: str):
+def cal_portfolio_derivatives_performance(end_date: str) -> pl.LazyFrame:
+    """
+    计算自己计算的组合的数据业绩排名
+
+    Parameters
+    ----------
+    end_date : str
+        结束日期
+
+    Returns
+    -------
+    pl.LazyFrame
+        portfolio_derivatives_performance表的数据
+    """
     portfolio_dates = get_portfolio_dates(end_date)
     perf_rank = _cal_portfolio_performance(
         end_date, "portfolio_derivatives_performance_inner"
@@ -417,7 +571,7 @@ def get_portfolio_derivatives_rank(end_date: str):
         .rename({"BENCHMARK_VALUE_OUTTER": "BENCHMARK_VALUE_INNER"})
         .pipe(rename_indicator_col_into_chinese)
     )
-    result = (
+    return (
         portfolio_dates.join(perf_rank, on=["START_DATE", "END_DATE"])
         .filter(
             (pl.col("PORTFOLIO_NAME") == pl.col("FLAG")) | (pl.col("FLAG") == "ALL")
@@ -425,10 +579,9 @@ def get_portfolio_derivatives_rank(end_date: str):
         .select(pl.all().exclude(["FLAG", "PORTFOLIO_NAME"]))
         .drop_nulls(subset=["PORTFOLIO_VALUE"])
     )
-    return result
 
 
-def get_portfolio_rank(end_date: str):
+def cal_portfolio_performance(end_date: str):
     portfolio_dates = get_portfolio_dates(end_date)
     perf_rank = _cal_portfolio_performance(end_date, "portfolio_performance_inner")
     perf_rank = (
@@ -437,7 +590,7 @@ def get_portfolio_rank(end_date: str):
         .pipe(add_peer_portfolio_performance, end_date)
         .pipe(rename_indicator_col_into_chinese)
     )
-    result = (
+    return (
         portfolio_dates.join(perf_rank, on=["START_DATE", "END_DATE"])
         .filter(
             (pl.col("PORTFOLIO_NAME") == pl.col("FLAG")) | (pl.col("FLAG") == "ALL")
@@ -445,7 +598,6 @@ def get_portfolio_rank(end_date: str):
         .select(pl.all().exclude(["FLAG", "PORTFOLIO_NAME"]))
         .drop_nulls(subset=["PORTFOLIO_VALUE"])
     )
-    return result
 
 
 def update_portfolio_performance(start_date: str, end_date: str) -> None:
@@ -467,24 +619,32 @@ def update_portfolio_performance(start_date: str, end_date: str) -> None:
         lambda x: x.strftime(DATE_FORMAT)
     )
 
+    derivative_list = []
+    offical_list = []
     for date in trade_dates:
         # print(date)
         # 写入自己计算的组合
 
-        portfolio_derivatives_rank = (
-            get_portfolio_derivatives_rank(date).collect().to_pandas()
-        )
-        DB_CONN_JJTG_DATA.upsert(
-            portfolio_derivatives_rank,
-            table="portfolio_derivatives_performance",
-        )
-        print(f"{date}-衍生指标写入完成")
-        portfolio_rank = get_portfolio_rank(date).collect().to_pandas()
-        DB_CONN_JJTG_DATA.upsert(
-            portfolio_rank,
-            table="portfolio_performance",
-        )
-        print(f"{date}-正式组合指标写入完成")
+        derivative_list.append(cal_portfolio_derivatives_performance(date))
+
+        # 写入官方组合
+
+        offical_list.append(cal_portfolio_performance(date))
+
+    write_into_database(derivative_list, "portfolio_derivatives_performance")
+    print(f"{trade_dates}组合衍生表现写入完成")
+
+    write_into_database(offical_list, "portfolio_performance")
+    print(f"{trade_dates}组合表现写入完成")
+
+
+def write_into_database(df_list: list[pl.LazyFrame], table: str):
+    for df in df_list:
+        df_result = df.collect().to_pandas()
+        if df_result.empty:
+            print("组合表现数据为空，不写入数据库")
+            return None
+        DB_CONN_JJTG_DATA.upsert(df_result, table=table)
 
 
 def query_portfolio_performance(trade_dt: str):
@@ -557,7 +717,7 @@ def main():
         start_date=start_date,
         end_date=end_date,
     )
-    # send_performance_mail(end_date)
+    send_performance_mail(end_date)
 
 
 if __name__ == "__main__":

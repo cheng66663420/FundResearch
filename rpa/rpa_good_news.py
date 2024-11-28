@@ -11,7 +11,6 @@ from wrapper.wx_wrapper import WxWrapper
 
 font = ImageFont.truetype("C:\\Windows\Fonts\\simhei.TTF", 70)
 fontbold = ImageFont.truetype("C:\\Windows\Fonts\\simhei.TTF", 60)
-import time
 
 
 class GoodNewsSender:

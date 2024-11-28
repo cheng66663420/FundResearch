@@ -333,7 +333,7 @@ class FundPerformance(BasePerformance):
         date_df = pl.from_pandas(date_df).select(
             pl.col("END_DATE").str.to_datetime("%Y%m%d")
         )
-        nav = (
+        return (
             get_fund_nav_by_pl(start_date, self.end_date)
             .join(date_df, how="right", on=["END_DATE"])
             .join(ticker_df, how="inner", on=["TICKER_SYMBOL"])
@@ -345,19 +345,6 @@ class FundPerformance(BasePerformance):
             .drop_nulls(subset=["NAV"])
             .sort(["TICKER_SYMBOL", "END_DATE"])
         )
-
-        # nav["END_DATE"] = nav["END_DATE"].apply(lambda x: x.strftime("%Y%m%d"))
-        # nav = nav.sort_values(by=["END_DATE", "TICKER_SYMBOL"])
-        # nav_list = []
-        # for _, df in nav.groupby(by="TICKER_SYMBOL"):
-        #     temp_df = df.copy()
-        #     temp_df = date_df.merge(temp_df, how="left", on=["END_DATE"])
-        #     temp_df = temp_df.ffill().dropna()
-        #     nav_list.append(temp_df)
-        # nav = pd.concat(nav_list)
-        # nav.rename(columns={"ADJ_NAV": "NAV"}, inplace=True)
-        # print(nav)
-        return nav
 
     def update_desc(self):
         query_sql = """

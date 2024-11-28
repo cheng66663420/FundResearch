@@ -15,6 +15,12 @@ def create_conn_str(config: dict) -> str:
     return f"mysql+pymysql://{config['user']}:{config['pwd']}@{config['host']}:{config['port']}/{config['database']}?charset=utf8"
 
 
+def crate_database_uri(database_type: str, config: dict) -> str:
+    return f"{database_type}://{config['user']}:{config['pwd']}@{config['host']}:{config['port']}/{config['database']}"
+
+
+JJTG_URI = crate_database_uri("mysql", DB_CONFIG["jjtg"])
+
 DB_CONN_JY = MySQL(**DB_CONFIG["jy"])
 DB_CONN_DATAYES = MySQL(**DB_CONFIG["datayes"])
 DB_CONN_WIND = MySQL(**DB_CONFIG["wind"])

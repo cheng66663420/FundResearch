@@ -307,9 +307,15 @@ class PerformancePL:
         """
         if isinstance(self.df, pl.DataFrame):
             self.df = self.df.lazy()
-        self.df = _parse_df(self.df)
-        self.df = _filter_df(self.df, self.start_date, self.end_date)
-        self.df = _cal_operation_days(self.df)
+        # self.df = _parse_df(self.df)
+        # self.df = _filter_df(self.df, self.start_date, self.end_date)
+        # self.df = _cal_operation_days(self.df)
+        self.df = (
+            self.df.pipe(_parse_df)
+            .pipe(_filter_df, self.start_date, self.end_date)
+            .pipe(_cal_operation_days)
+        )
+        return self.df
 
     def stats(self) -> pl.LazyFrame:
         return PerformanceHelper(self.df).stats()
@@ -330,7 +336,7 @@ if __name__ == "__main__":
                 TICKER_SYMBOL, 
                 ADJ_NAV as NAV
             FROM 
-                '{parquet_path}*.parquet' 
+                '{parquet_path}*.parquet'
             where 
                 1=1
                 and END_DATE between '{start_date}' and '{end_date}'
@@ -347,7 +353,7 @@ if __name__ == "__main__":
     ):
         start_date = parse(start_date)
         end_date = parse(end_date)
-        df = (
+        return (
             pl.scan_parquet(f"{parquet_path}*.parquet")
             .select(
                 [
@@ -363,7 +369,6 @@ if __name__ == "__main__":
                 by=["END_DATE", "TICKER_SYMBOL"],
             )
         ).collect()
-        return df
 
     import time
 
