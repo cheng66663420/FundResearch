@@ -513,20 +513,6 @@ def update_fund_adj_nav():
         query_db_conn=DB_CONN_JY_LOCAL,
         upsert_db_conn=DB_CONN,
     )
-    query_sql = """
-	SELECT
-		a.TICKER_SYMBOL,
-		max( a.END_DATE ) AS NAV_END_DATE 
-	FROM
-		fund_adj_nav a
-		JOIN fund_info b ON a.TICKER_SYMBOL = b.TICKER_SYMBOL 
-	WHERE
-		b.EXPIRE_DATE IS NULL 
-	GROUP BY
-	TICKER_SYMBOL 
-    """
-    temp = DB_CONN_JJTG_DATA.exec_query(query_sql)
-    DB_CONN_JJTG_DATA.upsert(temp, table="fund_perf_desc")
 
 
 def update_fund_nav_gr():

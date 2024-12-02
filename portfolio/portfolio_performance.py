@@ -9,6 +9,7 @@ from quant_utils.constant import DATE_FORMAT, DB_CONFIG, TODAY
 from quant_utils.constant_varialbles import LAST_TRADE_DT
 from quant_utils.db_conn import DB_CONN_JJTG_DATA
 from quant_utils.send_email import MailSender
+from quant_pl.pl_expr import rank_pct, rank_str
 
 RENAME_DICT = {
     "TICKER_SYMBOL": "组合名称",
@@ -304,60 +305,6 @@ def get_benchmark_value_outter(end_date: str) -> pl.lazyframe:
     )
 
 
-def rank_pct(
-    rank_col: str, patition_by: str | list = None, descending: bool = True
-) -> pl.Expr:
-    """
-    计算百分位排名
-
-    Parameters
-    ----------
-    rank_col : str
-        排名列
-    patition_by : str | list, optional
-        分组列, by default None
-    descending : bool, optional
-        是否降序, by default True
-
-    Returns
-    -------
-    pl.Expr
-        百分位排名
-    """
-    rank_expr = pl.col(rank_col).rank(descending=descending).cast(pl.UInt32)
-    count_expr = pl.col(rank_col).count().cast(pl.UInt32)
-    return 100 * ((rank_expr - 1) / (count_expr - 1)).over(patition_by)
-
-
-def rank_str(
-    rank_col: str, patition_by: str | list = None, descending: bool = True
-) -> pl.Expr:
-    """
-    计算百分位排名
-
-    Parameters
-    ----------
-    rank_col : str
-        排名列
-    patition_by : str | list, optional
-        分组列, by default None
-    descending : bool, optional
-            是否降序, by default True
-
-    Returns
-    -------
-    pl.Expr
-        百分位排名
-    """
-    rank_expr = pl.col(rank_col).rank(descending=descending).cast(pl.UInt32)
-    count_expr = pl.col(rank_col).count().cast(pl.UInt32)
-    return (
-        rank_expr.cast(pl.String).over(patition_by)
-        + "/"
-        + count_expr.cast(pl.String).over(patition_by)
-    )
-
-
 def _cal_performance_rank_helper(
     df: pl.LazyFrame,
     patition_by: str | list = None,
@@ -624,11 +571,9 @@ def update_portfolio_performance(start_date: str, end_date: str) -> None:
     for date in trade_dates:
         # print(date)
         # 写入自己计算的组合
-
         derivative_list.append(cal_portfolio_derivatives_performance(date))
 
         # 写入官方组合
-
         offical_list.append(cal_portfolio_performance(date))
 
     write_into_database(derivative_list, "portfolio_derivatives_performance")

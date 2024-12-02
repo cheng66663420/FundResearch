@@ -1,7 +1,8 @@
 # rootPath = os.path.split(os.path.abspath(os.path.dirname(__file__)))[0]
 # sys.path.append(rootPath)
 from functools import reduce
-
+import polars as pl
+from quant_pl.pl_expr import rank_pct, rank_str
 import pandas as pd
 from joblib import Parallel, delayed
 
@@ -815,89 +816,84 @@ def query_fund_performance(trade_dt: str = None):
     return df
 
 
-def __cal_fund_performance_rank_func(
-    df: pd.DataFrame, indicator: str, if_pct: bool = 1
-) -> pd.DataFrame:
-    """
-    辅助函数计算基金表现排名数据
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        需要计算的dataframe
-    indicator : str
-        需要计算的指标
-    level_num : int
-        分类等级
-    if_pct : bool
-        是否百分比
-
-    Returns
-    -------
-    pd.DataFrame
-        结果
-    """
-    result_list = []
-    rank_dict = {
-        "AVGRETURN": False,
-        "STDARDDEV": True,
-        "SHARPRATIO": False,
-        "MAXDOWNSIDE": True,
-        "CALMAR": False,
-    }
-
-    for level_num in range(1, 4):
-        for _, df_grouped in df.groupby(
-            by=[f"LEVEL_{i}" for i in range(1, level_num + 1)]
-        ):
-            temp_grouped = df_grouped.copy()
-            temp_indicator_df = temp_grouped[indicator].dropna()
-            if not temp_indicator_df.empty:
-                rank_df = cal_series_rank(
-                    temp_indicator_df,
-                    if_pct=if_pct,
-                    ascending=rank_dict[indicator.split("_")[1]],
-                ).reset_index()
-                rank_df["LEVEL"] = f"LEVEL_{level_num}"
-                result_list.append(rank_df)
-    return pd.concat(result_list)
-
-
 def cal_fund_performance_rank(trade_dt: str, if_pct: bool = 1) -> pd.DataFrame:
     """
-    计算基金表现排名数据,
-    如果if_pct为真，则计算排名百分比；否则计算排名n/m
+    计算基金表现排名
 
     Parameters
     ----------
     trade_dt : str
         交易日
+    if_pct : bool, optional
+        是否百分比, by default 1
 
     Returns
     -------
     pd.DataFrame
-        结果
+        基金表现排名
     """
+    indicator_list = [
+        "F_AVGRETURN_DAY",
+        "F_AVGRETURN_THISYEAR",
+        "F_AVGRETURN_QUARTER",
+        "F_AVGRETURN_HALFYEAR",
+        "F_AVGRETURN_YEAR",
+        "F_AVGRETURN_TWOYEAR",
+        "F_AVGRETURN_THREEYEAR",
+        "F_AVGRETURN_FOURYEAR",
+        "F_AVGRETURN_FIVEYEAR",
+        "F_STDARDDEV_HALFYEAR",
+        "F_STDARDDEV_YEAR",
+        "F_STDARDDEV_TWOYEAR",
+        "F_STDARDDEV_THREEYEAR",
+        "F_STDARDDEV_FIVEYEAR",
+        "F_SHARPRATIO_HALFYEAR",
+        "F_SHARPRATIO_YEAR",
+        "F_SHARPRATIO_TWOYEAR",
+        "F_SHARPRATIO_THREEYEAR",
+        "F_MAXDOWNSIDE_THISYEAR",
+        "F_MAXDOWNSIDE_QUARTER",
+        "F_MAXDOWNSIDE_HALFYEAR",
+        "F_MAXDOWNSIDE_YEAR",
+        "F_MAXDOWNSIDE_TWOYEAR",
+        "F_MAXDOWNSIDE_THREEYEAR",
+        "F_CALMAR_THISYEAR",
+        "F_CALMAR_QUARTER",
+        "F_CALMAR_HALFYEAR",
+        "F_CALMAR_YEAR",
+        "F_CALMAR_TWOYEAR",
+        "F_CALMAR_THREEYEAR",
+    ]
+
     df = query_fund_performance(trade_dt=trade_dt)
-    df = df.set_index("TICKER_SYMBOL")
-    indicator_list = list(
-        set(df.columns.tolist()) - set(["TRADE_DT", "LEVEL_1", "LEVEL_2", "LEVEL_3"])
-    )
-    result_list = Parallel(n_jobs=-1, backend="multiprocessing")(
-        delayed(__cal_fund_performance_rank_func)(df, indicator, if_pct)
-        for indicator in indicator_list
-    )
-    if not all(i is None for i in result_list):
-        result_df = reduce(
-            lambda left, right: pd.merge(
-                left, right, on=["TICKER_SYMBOL", "LEVEL"], how="outer"
-            ),
-            result_list,
-        )
-        result_df["TRADE_DT"] = trade_dt
-        return result_df
-    else:
-        return pd.DataFrame()
+    df = pl.from_pandas(df).lazy()
+    descending_dict = {
+        "AVGRETURN": True,
+        "STDARDDEV": False,
+        "SHARPRATIO": True,
+        "MAXDOWNSIDE": False,
+        "CALMAR": True,
+    }
+    func_dict = {1: rank_pct, 0: rank_str}
+    result_list = []
+    for i in range(1, 4):
+        partion_by = ["TRADE_DT"] + [f"LEVEL_{j}" for j in range(1, i + 1)]
+        expr_list = [
+            pl.col("TICKER_SYMBOL"),
+            pl.col("TRADE_DT"),
+            pl.lit(f"LEVEL_{i}").alias("LEVEL"),
+        ]
+        for indicator in indicator_list:
+            descending_condition = descending_dict[indicator.split("_")[1]]
+            expr_list.append(
+                func_dict[if_pct](
+                    indicator,
+                    descending=descending_condition,
+                    patition_by=partion_by,
+                ).alias(indicator)
+            )
+        result_list.append(df.select(expr_list))
+    return pl.concat(result_list).collect().to_pandas()
 
 
 def query_fund_performance_rank_pct(trade_dt: str = None):
@@ -981,5 +977,5 @@ if __name__ == "__main__":
     # df = DB_CONN_JJTG_DATA.exec_query(query)
     # df1 = query_fund_ret_rank("20231130")
     # df.merge(df1).to_excel("D:/每日监控.xlsx")
-    df = query_fund_performance("20240424")
+    df = cal_fund_performance_rank_func("20241127", if_pct=0)
     print(df)

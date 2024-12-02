@@ -7,6 +7,7 @@ from fund_db_updates_wind import update_wind_db
 import quant_utils.data_moudle as dm
 from quant_utils.constant import TODAY
 from quant_utils.db_conn import DB_CONN_JJTG_DATA
+import polars as pl
 
 
 def write_nav_into_ftr(date: str, file_path: str = "F:/data_ftr/fund_nav/") -> None:
@@ -63,12 +64,27 @@ def write_trade_dt():
     df.to_parquet("F:/data_parquet/trade_cal.parquet")
 
 
-if __name__ == "__main__":
+def update_perf_desc():
+    df = (
+        pl.scan_parquet("F:/data_parquet/fund_nav/*.parquet")
+        .group_by("TICKER_SYMBOL")
+        .agg(NAV_END_DATE=pl.col("END_DATE").max())
+    )
+    df = df.collect().to_pandas()
+    DB_CONN_JJTG_DATA.upsert(df, "fund_perf_desc")
+
+
+def main():
     # update_wind_db()
-    write_trade_dt()
     update_jy_db()
     update_derivatives_jy()
     update_derivatives_db()
     n_days_before = dm.offset_trade_dt(TODAY, 5)
     for date in dm.get_trade_cal(n_days_before, TODAY):
         write_nav_into_ftr(date)
+    write_trade_dt()
+    update_perf_desc()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,6 @@
+import contextlib
 import datetime
-
+import os
 
 import numpy as np
 import pandas as pd
@@ -12,9 +13,8 @@ import quant_utils.data_moudle as dm
 from fund_db.fund_db_updates import update_fund_performance_rank
 from quant_pl.performance_pl import PerformancePL
 from quant_utils.constant_varialbles import LAST_TRADE_DT
-from quant_utils.db_conn import DB_CONN_JJTG_DATA, DB_CONN_JY_LOCAL
+from quant_utils.db_conn import DB_CONN_JJTG_DATA, DB_CONN_JY_LOCAL, JJTG_URI
 from quant_utils.performance import Performance
-
 
 INIT_DATE = "20210903"
 
@@ -73,12 +73,13 @@ def parallel_cal_performance(
         benchmark_temp = pd.Series()
     result_list = []
 
-    try:
+    with contextlib.suppress(Exception):
         fund_alpha_nav = df_temp[start_date:end_date].dropna()
-        if not benchmark_temp.empty:
-            benchmark_nav = benchmark_temp[start_date:end_date].dropna()
-        else:
-            benchmark_nav = pd.Series()
+        benchmark_nav = (
+            pd.Series()
+            if benchmark_temp.empty
+            else benchmark_temp[start_date:end_date].dropna()
+        )
         # 数据是否以开始时间和结束时间结束
         if_condition = (
             fund_alpha_nav.empty
@@ -92,9 +93,6 @@ def parallel_cal_performance(
                 .T
             )
             result_list.append(perf)
-    except Exception as e:
-        pass
-
     if result_list:
         tmp_result = pd.concat(result_list).set_index(
             ["起始日期", "结束日期", "最大回撤日"]
@@ -161,14 +159,13 @@ def get_portfolio_constant_date(
 
 
 def __helper_func(constant_dates_df, date):
-    dates_list = []
     temp_df = constant_dates_df.copy()
     temp_df["END_DATE"] = date
     temp_df = temp_df.query("END_DATE > START_DATE")
     # print(temp_df)
     if temp_df.empty:
         return None
-
+    dates_list = []
     dates_list.append(temp_df)
     ytd = dm.get_last_peroid_end_date(end_date=date, period="y")
     mtd = dm.get_last_peroid_end_date(end_date=date, period="m")
@@ -260,7 +257,7 @@ class BasePerformance:
 
     def __init__(self, end_date: str, start_date: str = None) -> None:
         self.end_date = end_date
-        self.start_date = start_date if start_date else self.end_date
+        self.start_date = start_date or self.end_date
 
     def calculate(self, table, data_name_list: str = None):
         time_stamp1 = datetime.datetime.now()
@@ -287,7 +284,7 @@ class BasePerformance:
         for idx, (start_date, end_date) in dates_df.iterrows():
             perf = PerformancePL(df_nav_temp, start_date=start_date, end_date=end_date)
             result = perf.stats().collect().to_pandas()
-
+            print(result)
             result_list.append(result)
             # counter += 1
         if all(i is None for i in result_list):
@@ -295,10 +292,11 @@ class BasePerformance:
             # tqdm.write("=*" * 30)
             # update_desc_flag = 0
         else:
-            result = pd.concat(result_list)
+            result_df = pd.concat(result_list)
+            print(result_df)
             time_stamp3 = datetime.datetime.now()
             print(f"计算完成, 用时{time_stamp3 - time_stamp_nav}")
-            DB_CONN_JJTG_DATA.upsert(result, table=table)
+            DB_CONN_JJTG_DATA.upsert(result_df, table=table)
             print(f"写入完成, 用时{datetime.datetime.now() - time_stamp3}")
             # update_desc_flag = 1
         time_stamp6 = datetime.datetime.now()
@@ -323,7 +321,7 @@ class FundPerformance(BasePerformance):
         WHERE 
             1=1
             and NAV_END_DATE > IFNULL( FUND_PERF_END_DATE, '20000101' ) 
-            AND NAV_END_DATE >= '{self.start_date}' 
+            AND NAV_END_DATE >= '{self.start_date}'
         """
         ticker_df = DB_CONN_JJTG_DATA.exec_query(query_sql)
         ticker_df = pl.from_pandas(ticker_df)
@@ -432,38 +430,70 @@ class PortfolioDerivatiesPerformance(BasePerformance):
             AND a.TRADE_DT >= b.LISTED_DATE
             AND a.TRADE_DT <= '{self.end_date}'
         """
-        df = DB_CONN_JJTG_DATA.exec_query(query_sql)
-        return df
+        return DB_CONN_JJTG_DATA.exec_query(query_sql)
 
 
 def update_performance_inner(start_date, end_date):
     cal_needed_dates_df(start_date=start_date, end_date=end_date)
+    print("基金绩效更新开始")
     fund_perf = FundPerformance(start_date=start_date, end_date=end_date)
     fund_perf.calculate("fund_performance_inner")
+    print("==" * 30)
+    print("组合绩效更新开始")
     port_perf = PortfolioPerformance(start_date=start_date, end_date=end_date)
     port_perf.calculate("portfolio_performance_inner")
-
+    print("==" * 30)
+    print("衍生组合绩效更新开始")
     port_derivatives_perf = PortfolioDerivatiesPerformance(
         start_date=start_date, end_date=end_date
     )
     port_derivatives_perf.calculate("portfolio_derivatives_performance_inner")
-
+    print("==" * 30)
+    print("业绩基准绩效更新开始")
     benchmark_perf = BenchmarkPerformance(start_date=start_date, end_date=end_date)
     benchmark_perf.calculate("benchmark_performance_inner")
-
+    print("==" * 30)
+    print("组合同类绩效更新开始")
     peer_perf = PeerPortfolioPerformance(start_date=start_date, end_date=end_date)
     peer_perf.calculate("peer_performance_inner")
 
 
+def write_database_into_parquet(
+    end_date: str, table_name: str, parquet_path: str = "f:/data_parquet/"
+) -> None:
+    query_sql = f"select * from {table_name} where end_date = '{end_date}'"
+    df = pl.read_database_uri(query_sql, JJTG_URI).lazy()
+    df = df.select(pl.all().exclude(["ID", "CREATE_TIME", "UPDATE_TIME"]))
+    os.makedirs(parquet_path + table_name, exist_ok=True)
+    df.sink_parquet(f"{parquet_path}{table_name}/{end_date}.parquet")
+
+
+def update_fund_desc():
+    df = (
+        pl.scan_parquet("f:/data_parquet/fund_performance_inner/*.parquet")
+        .group_by("TICKER_SYMBOL")
+        .agg(
+            pl.col("END_DATE").min().alias("FUND_PERF_START_DATE"),
+            pl.col("END_DATE").max().alias("FUND_PERF_END_DATE"),
+        )
+    )
+    df = df.collect().to_pandas()
+    DB_CONN_JJTG_DATA.upsert(df, "fund_perf_desc")
+
+
 if __name__ == "__main__":
     today = datetime.datetime.now().strftime("%Y%m%d")
-    start_date = dm.offset_trade_dt(LAST_TRADE_DT, 2)
+    start_date = dm.offset_trade_dt(LAST_TRADE_DT, 3)
     end_date = LAST_TRADE_DT
     date_list = dm.get_trade_cal(start_date, end_date)
-
     cal_needed_dates_df(start_date=start_date, end_date=end_date)
-
     update_performance_inner(start_date=start_date, end_date=end_date)
     for date in date_list:
         print(date)
         update_fund_performance_rank(date)
+        print("==" * 30)
+        write_database_into_parquet(
+            end_date=date,
+            table_name="fund_performance_inner",
+        )
+    update_fund_desc()
