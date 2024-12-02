@@ -797,7 +797,7 @@ def query_fund_performance(trade_dt: str = None):
         "F_CALMAR_TWOYEAR",
         "F_CALMAR_THREEYEAR",
     ]
-    name_list = [i for i in rename_dict.keys()]
+    name_list = list(rename_dict.keys())
     df = df[df["DATE_NAME"].isin(name_list)]
     df["DATE_NAME"] = df["DATE_NAME"].map(rename_dict)
     df.set_index(["TICKER_SYMBOL", "TRADE_DT", "DATE_NAME"], inplace=True)
@@ -866,6 +866,8 @@ def cal_fund_performance_rank(trade_dt: str, if_pct: bool = 1) -> pd.DataFrame:
     ]
 
     df = query_fund_performance(trade_dt=trade_dt)
+    cols = df.columns
+    cols = [i for i in cols if i.startswith("F_")]
     df = pl.from_pandas(df).lazy()
     descending_dict = {
         "AVGRETURN": True,
@@ -884,6 +886,8 @@ def cal_fund_performance_rank(trade_dt: str, if_pct: bool = 1) -> pd.DataFrame:
             pl.lit(f"LEVEL_{i}").alias("LEVEL"),
         ]
         for indicator in indicator_list:
+            # if indicator not in cols:
+            #     continue
             descending_condition = descending_dict[indicator.split("_")[1]]
             expr_list.append(
                 func_dict[if_pct](

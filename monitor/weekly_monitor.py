@@ -168,4 +168,4 @@ if dm.if_period_end(date, period="WEEK"):
         file_path="D:/周报推动.xlsx",
         content="详情请见附件",
     )
-    mail_sender.send_mail()
+    # mail_sender.send_mail()

@@ -82,7 +82,7 @@ class MySQL:
             connection.commit()
 
     def upsert(
-        self, df_to_upsert: pd.DataFrame, table: str, batch_size: int = 10000
+        self, df_to_upsert: pd.DataFrame, table: str, batch_size: int = 50000
     ) -> None:
         """
         批量插入数据到MySQL数据库
@@ -94,7 +94,7 @@ class MySQL:
         table : str
             表名
         batch_size : int, optional
-            每次插入的行数, by default 10000
+            每次插入的行数, by default 50000
         """
         if df_to_upsert.empty:
             logging.info("数据为空,不需要写入")

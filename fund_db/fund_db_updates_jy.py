@@ -9,6 +9,7 @@ import logging
 import time
 
 import pandas as pd
+import polars as pl
 
 import quant_utils.data_moudle as dm
 from quant_utils import constant
@@ -18,6 +19,7 @@ from quant_utils.db_conn import (
     DB_CONN_JY,
     DB_CONN_JY_LOCAL,
     DB_CONN_JY_TEST,
+    JY_URI,
 )
 from quant_utils.send_email import MailSender
 from quant_utils.utils import yield_split_list
@@ -55,7 +57,10 @@ def query_from_remote_upsert_into_local(
         upsert的数据库联接
     """
     # 查询数据
-    df = query_db_conn.exec_query(query_sql)
+    print(f"{table}查询开始!")
+    df = pl.read_database_uri(
+        query=query_sql, uri=query_db_conn, partition_on="JSID", partition_num=16
+    ).to_pandas()
     print(f"{table}查询结束!")
     df = df.drop_duplicates()
     if not df.empty:
@@ -82,22 +87,15 @@ def update_jy_table_into_local(
         更新数据连接, by default DB_CONN_JY_LOCAL
     """
     max_jsid = get_max_jsid(jy_table)
-
-    qyery = f"select JSID from {jy_table} where JSID >= {max_jsid} order by JSID"
-    jsid_list = query_db_conn.exec_query(qyery)["JSID"].tolist()
-    jsid_small_list = list(yield_split_list(jsid_list, 500_000))
-    for j, i in enumerate(jsid_small_list, start=1):
-        print(f"{j}/{len(jsid_small_list)}")
-        query_sql = f"""
-        select * from {jy_table} where 1=1 and jsid between {i[0]} and {i[-1]}
-        """
-
-        query_from_remote_upsert_into_local(
-            query_sql=query_sql,
-            table=jy_table,
-            query_db_conn=query_db_conn,
-            upsert_db_conn=upsert_db_conn,
-        )
+    query_sql = f"""
+    select * from {jy_table} where 1=1 and JSID >= {max_jsid}
+    """
+    query_from_remote_upsert_into_local(
+        query_sql=query_sql,
+        table=jy_table,
+        query_db_conn=query_db_conn,
+        upsert_db_conn=upsert_db_conn,
+    )
 
 
 def update_jy_db_test(step=500000):
@@ -129,63 +127,58 @@ def update_jy_db_test(step=500000):
 
 def update_jy_db_local(step=500000):
     table_dict = {"mf_purchaseandredeemn": "fund_purchaseandredeemn"}
-    db_conn = DB_CONN_JY
+    db_conn = JY_URI
     for table_jy, table_local in table_dict.items():
         query = f"""
             select ifnull(max(JSID), 0) as JSID from {table_local}
         """
         max_jsid = DB_CONN_JJTG_DATA.exec_query(query)["JSID"].values[0]
 
-        qyery = f"select JSID from {table_jy} where JSID >= {max_jsid} order by JSID"
-        jsid_list = db_conn.exec_query(qyery)["JSID"].tolist()
-        jsid_small_list = list(yield_split_list(jsid_list, step))
-        for j, i in enumerate(jsid_small_list, start=1):
-            print(f"{j}/{len(jsid_small_list)}")
-            query = f"""
-            SELECT
-                a.ID,
-                a.EndDate AS TRADE_DT,
-                b.SecuCode AS TICKER_SYMBOL,
-                ApplyingTypeI,
-                RedeemTypeI,
-                ApplyingMaxI,
-                ApplyingTypeII,
-                RedeemTypeII,
-                ApplyingMaxII,
-                ApplyingTypeIII,
-                RedeemTypeIII,
-                ApplyingMaxIII,
-                ApplyingTypeIV,
-                RedeemTypeIV,
-                ApplyingMaxIV,
-                ApplyingTypeV,
-                RedeemTypeV,
-                ApplyingMaxV,
-                ApplyingTypeVI,
-                RedeemTypeVI,
-                ApplyingMaxVI,
-                ApplyingTypeVII,
-                RedeemTypeVII,
-                ApplyingMaxVII,
-                ApplyingTypeVIII,
-                RedeemTypeVIII,
-                ApplyingMaxVIII,
-                a.InsertTime,
-                a.UpdateTime,
-                a.JSID 
-            FROM
-                mf_purchaseandredeemn a
-                JOIN secumain b ON a.InnerCode = b.InnerCode 
-            WHERE
-                1 =1
-                and a.jsid between {i[0]} and {i[-1]}
-            """
-            query_from_remote_upsert_into_local(
-                query_sql=query,
-                table=table_local,
-                query_db_conn=db_conn,
-                upsert_db_conn=DB_CONN_JJTG_DATA,
-            )
+        query = f"""
+        SELECT
+            a.ID,
+            a.EndDate AS TRADE_DT,
+            b.SecuCode AS TICKER_SYMBOL,
+            ApplyingTypeI,
+            RedeemTypeI,
+            ApplyingMaxI,
+            ApplyingTypeII,
+            RedeemTypeII,
+            ApplyingMaxII,
+            ApplyingTypeIII,
+            RedeemTypeIII,
+            ApplyingMaxIII,
+            ApplyingTypeIV,
+            RedeemTypeIV,
+            ApplyingMaxIV,
+            ApplyingTypeV,
+            RedeemTypeV,
+            ApplyingMaxV,
+            ApplyingTypeVI,
+            RedeemTypeVI,
+            ApplyingMaxVI,
+            ApplyingTypeVII,
+            RedeemTypeVII,
+            ApplyingMaxVII,
+            ApplyingTypeVIII,
+            RedeemTypeVIII,
+            ApplyingMaxVIII,
+            a.InsertTime,
+            a.UpdateTime,
+            a.JSID 
+        FROM
+            {table_jy} a
+            JOIN secumain b ON a.InnerCode = b.InnerCode 
+        WHERE
+            1 =1
+            and a.jsid >= {max_jsid}
+        """
+        query_from_remote_upsert_into_local(
+            query_sql=query,
+            table=table_local,
+            query_db_conn=db_conn,
+            upsert_db_conn=DB_CONN_JJTG_DATA,
+        )
         print(f"{table_local}完成更新写入")
         print("++" * 40)
 
@@ -256,7 +249,7 @@ def update_jy_db():
     """
     update_jy_table_into_local(
         jy_table="jydb_deleterec",
-        query_db_conn=DB_CONN_JY,
+        query_db_conn=JY_URI,
     )
 
     jy_tables = [
@@ -285,15 +278,18 @@ def update_jy_db():
         "mf_netvalue",
         "mf_financialindex",
         "mf_fundtype",
-        # "mf_abnormalreturn",
-        # "mf_brinsonperfatrb",
-        # "mf_calmarratio",
-        # "mf_campisiperfatrb",
-        # "mf_fundalpha",
-        # "mf_fundmaxdrawd",
-        # "mf_fundsharperatio",
-        # "mf_scaleanalysis",
-        # "mf_scalechange",
+        "mf_abnormalreturn",
+        "mf_brinsonperfatrb",
+        "mf_calmarratio",
+        "mf_campisiperfatrb",
+        "mf_fundalpha",
+        "mf_fundmaxdrawd",
+        "mf_fundsharperatio",
+        "mf_scaleanalysis",
+        "mf_scalechange",
+        "mf_risksecurityanalysis",
+        "lc_indexcomponentsweight",
+        "mf_purchaseandredeemn",
         "mf_advisorscalerank",
         "mf_issueandlisting",
         "mf_investtargetcriterion",
@@ -314,15 +310,12 @@ def update_jy_db():
         "qt_indexquote",
         "bond_indexbasicinfo",
         "jydb_deleterec",
-        "mf_risksecurityanalysis",
-        "lc_indexcomponentsweight",
         "lc_shsctradestat",
         "bond_biindustry",
         "bond_code",
         "bond_conbdissueproject",
         "bond_creditgrading",
         "mf_fundportifoliodetail",
-        # "lc_dindicesforvaluation",
         "mf_fcexpanalysis",
         "mf_assetallocationnew",
         "mf_fcnumofmanager",
@@ -340,7 +333,6 @@ def update_jy_db():
         "mf_pricereturnhis",
         "lc_zhsctradestat",
         "mf_netvalueretranstwo",
-        "mf_purchaseandredeemn",
         "qt_adjustingfactor",
         "bond_cbyieldcurve",
         "mf_jyfundtype",
@@ -349,16 +341,17 @@ def update_jy_db():
         "qt_osindexquote",
         "qt_goldtrademarket",
         "mf_fundtagchange",
+        # "lc_dindicesforvaluation",
     ]
 
     for table in jy_tables:
         try:
             update_jy_table_into_local(
                 jy_table=table,
-                query_db_conn=DB_CONN_JY,
+                query_db_conn=JY_URI,
             )
-        except:
-            continue
+        except Exception as e:
+            print(f"更新表{table}失败，错误信息：{e}")
 
     date = dm.get_now()
     mail_sender = MailSender()

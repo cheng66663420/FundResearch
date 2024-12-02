@@ -15,7 +15,12 @@ import quant_utils.data_moudle as dm
 from fund_db.fund_db_cal_func import cal_enhanced_index_performance
 from quant_utils.constant import LOG_FILE_PATH, LOG_FORMAT
 from quant_utils.constant_varialbles import LAST_TRADE_DT
-from quant_utils.db_conn import DB_CONN_DATAYES, DB_CONN_JJTG_DATA, DB_CONN_JY
+from quant_utils.db_conn import (
+    DB_CONN_DATAYES,
+    DB_CONN_JJTG_DATA,
+    DB_CONN_JY,
+    DB_CONN_JY_LOCAL,
+)
 from quant_utils.send_email import MailSender
 
 logging.basicConfig(
@@ -173,24 +178,6 @@ def update_fund_adj_nav(update_date: str = None):
     """
     if update_date is None:
         update_date = LAST_TRADE_DT
-
-    # query_sql = f"""
-    # SELECT
-    #     SUBSTRING_INDEX( F_INFO_WINDCODE, '.', 1 ) AS TICKER_SYMBOL,
-    #     PRICE_DATE AS END_DATE,
-    #     F_NAV_UNIT AS UNIT_NAV,
-    #     F_NAV_ADJUSTED AS ADJ_NAV,
-    #     F_NAV_ADJFACTOR AS ADJ_FACTOR
-    # FROM
-    #     chinamutualfundnav
-    # WHERE
-    #     1 = 1
-    #     AND PRICE_DATE = "{update_date}"
-    # """
-
-    # query_from_remote_upsert_into_local(
-    #     query_sql, table="fund_adj_nav", query_db_conn=DB_CONN_JJTG_DATA
-    # )
 
     query_sql = f"""
     SELECT
@@ -463,49 +450,6 @@ def update_fund_derivatives_enhanced_index_alpha(update_date: str = None):
         query_db_conn=DB_CONN_JJTG_DATA,
     )
 
-    # query_sql = f"""
-    #     with a as (SELECT
-    #         a.END_DATE,
-    #         a.TICKER_SYMBOL,
-    #         b.SEC_SHORT_NAME,
-    #         c.IDX_SHORT_NAME,
-    #         a.LOG_RET AS FUND_LOG_RET,
-    #         (log(1+ChangePCT/100)*100) AS IDX_LOG_RET,
-    #         a.LOG_RET - (log(1+ChangePCT/100)*100) AS LOG_ALPHA
-    #     FROM
-    #         fund_adj_nav a
-    #         JOIN fund_type_own b ON b.TICKER_SYMBOL = a.TICKER_SYMBOL
-    #         JOIN fund_tracking_idx c ON c.TICKER_SYMBOL = a.TICKER_SYMBOL
-    #         JOIN jy_indexquote d ON d.SecuCode = c.IDX_SYMBOL
-    #         AND d.TradingDay = a.END_DATE
-    #     WHERE
-    #         1 = 1
-    #         AND a.END_DATE = "{update_date}"
-    #         AND c.BEGIN_DATE <= "{update_date}" AND ifnull( c.END_DATE, '2099-12-31' ) > "{update_date}"
-    #         AND b.REPORT_DATE = (
-    #         SELECT
-    #             max( REPORT_DATE )
-    #         FROM
-    #             fund_type_own
-    #         WHERE
-    #         PUBLISH_DATE <= "{update_date}")
-    #     )SELECT
-    #         a.*,
-    #         a.LOG_ALPHA + ifnull( c.CUM_LOG_ALPHA, 0 ) AS CUM_LOG_ALPHA,
-    #         exp(( a.LOG_ALPHA + ifnull( c.CUM_LOG_ALPHA, 0 ))/ 100 ) AS CUM_ALPHA_NAV
-    #     FROM
-    #         a
-    #         LEFT JOIN md_tradingdaynew b ON a.END_DATE = b.TRADE_DT
-    #         AND b.SECU_MARKET = 83
-    #         LEFT JOIN fund_derivatives_enhanced_index_alpha c ON c.END_DATE = b.PREV_TRADE_DATE
-    #         AND c.TICKER_SYMBOL = a.TICKER_SYMBOL
-    #     """
-    # query_from_remote_upsert_into_local(
-    #     query_sql,
-    #     table="fund_derivatives_enhanced_index_alpha",
-    #     query_db_conn=DB_CONN_JJTG_DATA,
-    # )
-
 
 def update_fund_derivatives_enhanced_index_performance(
     update_date: str = None, ticker_symbol_list: list = None
@@ -601,25 +545,29 @@ def update_bond_derivatives_temperature(update_date: str = None):
     if update_date is None:
         update_date = LAST_TRADE_DT
 
-    sql_query = """
-        SELECT
-            date_format(EndDate, "%Y%m%d") AS TRADE_DT,
-            CurveCode AS B_ANAL_CURVENUMBER,
-            YearsToMaturity AS B_ANAL_CURVETERM,
-            Yield * 100 AS B_ANAL_YIELD 
-        FROM
-            `bond_cbyieldcurve` 
-        WHERE
-            1 = 1 
-            AND CurveCode IN ( 69, 44, 281, 280, 290, 10, 195, 74, 219 ) 
-            AND `YieldTypeCode` = 1 
-            AND `YearsToMaturity` IN ( 1, 3, 5, 10 ) 
-        ORDER BY
-            B_ANAL_CURVENUMBER,
-            B_ANAL_CURVETERM,
-            TRADE_DT
-    """
-    bond_ytm = DB_CONN_JY.exec_query(sql_query)
+    def _get_bond_ytm(curve_code: str) -> pd.DataFrame:
+        sql_query = f"""
+            SELECT
+                date_format(EndDate, "%Y%m%d") AS TRADE_DT,
+                CurveCode AS B_ANAL_CURVENUMBER,
+                YearsToMaturity AS B_ANAL_CURVETERM,
+                Yield * 100 AS B_ANAL_YIELD 
+            FROM
+                `bond_cbyieldcurve` 
+            WHERE
+                1 = 1 
+                AND CurveCode = '{curve_code}'
+                AND `YieldTypeCode` = 1 
+                AND `YearsToMaturity` IN ( 1, 3, 5, 10 ) 
+        """
+        return DB_CONN_JY_LOCAL.exec_query(sql_query)
+
+    bond_ytm_list = []
+    for curve_code in (69, 44, 281, 280, 290, 10, 195, 74, 219):
+        bond_ytm_list.append(_get_bond_ytm(curve_code))
+    bond_ytm = pd.concat(bond_ytm_list).sort_values(
+        by=["B_ANAL_CURVENUMBER", "B_ANAL_CURVETERM", "TRADE_DT"]
+    )
     code_dict = {
         69: 1102,
         44: 1262,
@@ -1313,6 +1261,7 @@ def update_derivatives_db(update_date: str = None):
         update_date = LAST_TRADE_DT
     func_list = [
         update_barra_data,
+        update_portfolio_benchmark_ret,
         update_fund_redeem_fee,
         update_fund_adj_nav,
         update_fund_index_description,
@@ -1326,7 +1275,6 @@ def update_derivatives_db(update_date: str = None):
         update_fund_holding_sector,
         update_qt_tradingdaynew,
         update_temperature_stock,
-        update_portfolio_benchmark_ret,
         # update_fund_performance_rank,
     ]
 
@@ -1354,11 +1302,11 @@ def update_derivatives_db(update_date: str = None):
 
 
 if __name__ == "__main__":
-    # update_fund_adj_nav()
+    update_derivatives_db("20241127")
     # update_temperature_stock("20240417")
     # update_fund_derivatives_enhanced_index_performance()
     # update_fund_derivatives_enhanced_index_performance_rank()
-    update_portfolio_benchmark_ret("20240814")
+    # update_portfolio_benchmark_ret("20241127")
     # dts = dm.get_period_end_date(start_date="20240711", end_date="20241021", period="d")
     # for dt in dts:
     #     print(dt)

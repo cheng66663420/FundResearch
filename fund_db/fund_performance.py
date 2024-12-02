@@ -281,28 +281,31 @@ class BasePerformance:
         print(f"净值处理完成, 用时{time_stamp_nav - time_stamp2}")
         # update_desc_flag = 0
         result_list = []
-        for idx, (start_date, end_date) in dates_df.iterrows():
+        for _, (start_date, end_date) in dates_df.iterrows():
             perf = PerformancePL(df_nav_temp, start_date=start_date, end_date=end_date)
-            result = perf.stats().collect().to_pandas()
-            print(result)
+            result = perf.stats().with_columns(
+                pl.when(pl.col(pl.Float64) > 10**8)
+                .then(np.inf)
+                .otherwise(pl.col(pl.Float64))
+                .name.keep()
+            )
+            result = result.with_columns(
+                pl.when(pl.col(pl.Float64) < -(10**8))
+                .then(-np.inf)
+                .otherwise(pl.col(pl.Float64))
+                .name.keep()
+            )
             result_list.append(result)
-            # counter += 1
+
         if all(i is None for i in result_list):
             tqdm.write("结果都是None")
-            # tqdm.write("=*" * 30)
-            # update_desc_flag = 0
         else:
-            result_df = pd.concat(result_list)
-            print(result_df)
-            time_stamp3 = datetime.datetime.now()
-            print(f"计算完成, 用时{time_stamp3 - time_stamp_nav}")
+            result_df = pl.concat(result_list).collect().to_pandas()
+            print("计算完成,准备写入")
             DB_CONN_JJTG_DATA.upsert(result_df, table=table)
-            print(f"写入完成, 用时{datetime.datetime.now() - time_stamp3}")
-            # update_desc_flag = 1
+            print("写入完成")
         time_stamp6 = datetime.datetime.now()
         print(f"总用时{time_stamp6 - time_stamp1}")
-        # if update_desc_flag != 0:
-        #     self.update_desc()
 
     def get_nav(self):
         pass
@@ -320,7 +323,7 @@ class FundPerformance(BasePerformance):
             fund_perf_desc 
         WHERE 
             1=1
-            and NAV_END_DATE > IFNULL( FUND_PERF_END_DATE, '20000101' ) 
+            # and NAV_END_DATE > IFNULL( FUND_PERF_END_DATE, '20000101' ) 
             AND NAV_END_DATE >= '{self.start_date}'
         """
         ticker_df = DB_CONN_JJTG_DATA.exec_query(query_sql)
@@ -483,7 +486,7 @@ def update_fund_desc():
 
 if __name__ == "__main__":
     today = datetime.datetime.now().strftime("%Y%m%d")
-    start_date = dm.offset_trade_dt(LAST_TRADE_DT, 3)
+    start_date = dm.offset_trade_dt(LAST_TRADE_DT, 2)
     end_date = LAST_TRADE_DT
     date_list = dm.get_trade_cal(start_date, end_date)
     cal_needed_dates_df(start_date=start_date, end_date=end_date)
