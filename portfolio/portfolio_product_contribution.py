@@ -379,18 +379,18 @@ if __name__ == "__main__":
     alpha_list = []
     sum_list = []
     start_date = "20240101"
-    end_date = "20241010"
-    level_num = 1
+    end_date = "20241202"
+    level_num = 2
     file_path = f"""f:/BaiduNetdiskWorkspace/1-基金投研/2.1-监控/2-定时数据/绩效分析报告/绩效分析{start_date}-{end_date}.xlsx"""
     port_list = [
-        "知己目标盈027期",
-        "知己目标盈028期",
-        "知己目标盈029期",
-        "知己目标盈030期",
-        "知己目标盈031期",
+        "知己优选-短债增强",
+        "知己优选-月月享",
     ]
     abs_ret, alpha_ret, sum_ret = get_portfolios_products_contribution(
-        start_date=start_date, end_date=end_date, portfolio_list=port_list
+        start_date=start_date,
+        end_date=end_date,
+        portfolio_list=port_list,
+        level_num=level_num,
     )
 
     with pd.ExcelWriter(file_path) as writer:

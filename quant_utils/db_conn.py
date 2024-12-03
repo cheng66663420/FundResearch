@@ -22,6 +22,7 @@ def crate_database_uri(database_type: str, config: dict) -> str:
 JJTG_URI = crate_database_uri("mysql", DB_CONFIG["jjtg"])
 JY_URI = crate_database_uri("mysql", DB_CONFIG["jy"])
 JY_LOCAL_URI = crate_database_uri("mysql", DB_CONFIG["jy_local"])
+PG_DATA_URI = crate_database_uri("postgresql", DB_CONFIG["pg_data"])
 
 DB_CONN_JY = MySQL(**DB_CONFIG["jy"])
 DB_CONN_DATAYES = MySQL(**DB_CONFIG["datayes"])
