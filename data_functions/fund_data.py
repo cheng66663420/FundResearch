@@ -763,9 +763,15 @@ def query_fund_performance(trade_dt: str = None):
         "YTD": "THISYEAR",
         "近3月": "QUARTER",
         "近1日": "DAY",
+        "近1周": "WEEK",
+        "近1月": "MONTH",
+        "近2月": "TWOMONTH",
     }
     indicator_list = [
         "F_AVGRETURN_DAY",
+        "F_AVGRETURN_WEEK",
+        "F_AVGRETURN_MONTH",
+        "F_AVGRETURN_TWOMONTH",
         "F_AVGRETURN_THISYEAR",
         "F_AVGRETURN_QUARTER",
         "F_AVGRETURN_HALFYEAR",
@@ -774,7 +780,6 @@ def query_fund_performance(trade_dt: str = None):
         "F_AVGRETURN_THREEYEAR",
         "F_AVGRETURN_FOURYEAR",
         "F_AVGRETURN_FIVEYEAR",
-        "F_AVGRETURN_SIXYEAR",
         "F_STDARDDEV_HALFYEAR",
         "F_STDARDDEV_YEAR",
         "F_STDARDDEV_TWOYEAR",
@@ -784,6 +789,9 @@ def query_fund_performance(trade_dt: str = None):
         "F_SHARPRATIO_YEAR",
         "F_SHARPRATIO_TWOYEAR",
         "F_SHARPRATIO_THREEYEAR",
+        "F_MAXDOWNSIDE_WEEK",
+        "F_MAXDOWNSIDE_MONTH",
+        "F_MAXDOWNSIDE_TWOMONTH",
         "F_MAXDOWNSIDE_THISYEAR",
         "F_MAXDOWNSIDE_QUARTER",
         "F_MAXDOWNSIDE_HALFYEAR",
@@ -834,6 +842,9 @@ def cal_fund_performance_rank(trade_dt: str, if_pct: bool = 1) -> pd.DataFrame:
     """
     indicator_list = [
         "F_AVGRETURN_DAY",
+        "F_AVGRETURN_WEEK",
+        "F_AVGRETURN_MONTH",
+        "F_AVGRETURN_TWOMONTH",
         "F_AVGRETURN_THISYEAR",
         "F_AVGRETURN_QUARTER",
         "F_AVGRETURN_HALFYEAR",
@@ -851,6 +862,9 @@ def cal_fund_performance_rank(trade_dt: str, if_pct: bool = 1) -> pd.DataFrame:
         "F_SHARPRATIO_YEAR",
         "F_SHARPRATIO_TWOYEAR",
         "F_SHARPRATIO_THREEYEAR",
+        "F_MAXDOWNSIDE_WEEK",
+        "F_MAXDOWNSIDE_MONTH",
+        "F_MAXDOWNSIDE_TWOMONTH",
         "F_MAXDOWNSIDE_THISYEAR",
         "F_MAXDOWNSIDE_QUARTER",
         "F_MAXDOWNSIDE_HALFYEAR",
@@ -947,39 +961,11 @@ def query_fund_performance_rank_pct(trade_dt: str = None):
 
 
 if __name__ == "__main__":
-    import datetime
-
-    # t1 = datetime.datetime.now()
-    # b = cal_fund_performance_rank("20231220")
-    # b = b.query("TICKER_SYMBOL == '005156'")
-    # t2 = datetime.datetime.now()
-    # print(t2 - t1)
-    # b.to_excel("D:/aaaaaa.xlsx")
-    # df = cal_fund_alpha_total_score(
-    #     end_date="20240117",
-    #     period="1Y",
-    #     indicator_name_weights={
-    #         "IR": 0.3,
-    #         "ALPHA": 0.5,
-    #         "MAXDD": 0.2,
-    #     },
-    #     indicator_period_weights={
-    #         "3M": 0.2,
-    #         "6M": 0.3,
-    #         "1Y": 0.5,
-    #     },
-    # )
-    # df = (
-    #     df.merge(query_fund_info(), how="left")
-    #     .merge(query_fund_asset_own(), how="left")
-    #     .merge(query_fund_fee(), how="left")
-    #     .merge(query_basic_products(), how="left")
-    # )
-    # df["NET_ASSET"] = df["NET_ASSET"] / 100000000
-    # (df.sort_values(by="TOTAL_SCORE", ascending=False).to_excel("D:/1Y期.xlsx"))
-    # query = """select * from view_portfolio_products_daily_monitor"""
-    # df = DB_CONN_JJTG_DATA.exec_query(query)
-    # df1 = query_fund_ret_rank("20231130")
-    # df.merge(df1).to_excel("D:/每日监控.xlsx")
-    df = cal_fund_performance_rank_func("20241127", if_pct=0)
-    print(df)
+    dates_list = dm.get_trade_cal("20230727", "20241203")
+    for date in dates_list:
+        print(date)
+        df = cal_fund_performance_rank(date, if_pct=1)
+        df.to_parquet(f"f:/data_parquet/fund_performance_rank_pct/{date}.parquet")
+        df = cal_fund_performance_rank(date, if_pct=0)
+        df.to_parquet(f"f:/data_parquet/fund_performance_rank/{date}.parquet")
+        print("==" * 30)

@@ -122,11 +122,11 @@ def _cal_operation_days(df: pl.LazyFrame) -> pl.LazyFrame:
 
 @dataclass
 class PerformanceHelper:
-    df: pl.DataFrame | pl.LazyFrame
+    df: pl.LazyFrame
 
     def __post_init__(self):
-        if isinstance(self.df, pl.DataFrame):
-            self.df = self.df.lazy()
+        # if isinstance(self.df, pl.DataFrame):
+        #     self.df = self.df.lazy()
         self.df = self.df.sort(
             by=["TICKER_SYMBOL", "END_DATE"],
         )
@@ -266,7 +266,7 @@ class PerformanceHelper:
 
 @dataclass
 class PerformancePL:
-    df: pl.DataFrame | pl.LazyFrame
+    df: pl.LazyFrame
     start_date: str
     end_date: str
 
@@ -305,11 +305,8 @@ class PerformancePL:
         pl.DataFrame
             净值数据
         """
-        if isinstance(self.df, pl.DataFrame):
-            self.df = self.df.lazy()
-        # self.df = _parse_df(self.df)
-        # self.df = _filter_df(self.df, self.start_date, self.end_date)
-        # self.df = _cal_operation_days(self.df)
+        # if isinstance(self.df, pl.DataFrame):
+        #     self.df = self.df.lazy()
         self.df = (
             self.df.pipe(_parse_df)
             .pipe(_filter_df, self.start_date, self.end_date)

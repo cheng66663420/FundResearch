@@ -281,6 +281,7 @@ class BasePerformance:
         print(f"净值处理完成, 用时{time_stamp_nav - time_stamp2}")
         # update_desc_flag = 0
         result_list = []
+        df_nav_temp = df_nav_temp.lazy()
         for _, (start_date, end_date) in dates_df.iterrows():
             perf = PerformancePL(df_nav_temp, start_date=start_date, end_date=end_date)
             result = perf.stats().with_columns(
@@ -484,7 +485,7 @@ def update_fund_desc():
     DB_CONN_JJTG_DATA.upsert(df, "fund_perf_desc")
 
 
-if __name__ == "__main__":
+def main():
     today = datetime.datetime.now().strftime("%Y%m%d")
     start_date = dm.offset_trade_dt(LAST_TRADE_DT, 2)
     end_date = LAST_TRADE_DT
@@ -500,3 +501,7 @@ if __name__ == "__main__":
             table_name="fund_performance_inner",
         )
     update_fund_desc()
+
+
+if __name__ == "__main__":
+    main()

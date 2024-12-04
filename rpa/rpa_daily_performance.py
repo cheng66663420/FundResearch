@@ -3,7 +3,7 @@ import subprocess
 import emoji
 import pandas as pd
 from watermarker.marker import add_mark
-
+import time
 import data_functions.portfolio_data as pdf
 import quant_utils.data_moudle as dm
 from quant_utils.db_conn import DB_CONN_JJTG_DATA
@@ -208,28 +208,38 @@ def rpa_daily_target_portfolio_performance():
     )
 
 
+def main():
+    kill_processes_containing("WPS")
+    rpa_daily_performance(LAST_TRADE_DT)
+    time.sleep(10)
+    kill_processes_containing("WPS")
+    time.sleep(10)
+    rpa_daily_target_portfolio_performance()
+    kill_processes_containing("WPS")
+    wx_robot = WxWrapper()
+    mention_moble_list = wx_robot.get_mentioned_moble_list_by_name(
+        ["陈娇君", "陆天琦", "陈恺寅"]
+    )
+    wx_robot.send_image(
+        image_path="E:/基金投顾自动化/结果/目标盈日度监控.png",
+    )
+    wx_robot.send_image(
+        image_path="E:/基金投顾自动化/结果/策略业绩日报v7.png",
+    )
+    wx_robot.send_text(
+        content="#每日播报 仅供各位领导同事内部参考，请勿对客转发",
+    )
+    wx_robot.send_text(
+        content=f"{emoji.emojize('❣')}今日基金投顾业绩播报与目标盈播报已送达,请注意查收{emoji.emojize('❣')}",
+        mentioned_mobile_list=mention_moble_list,
+    )
+
+
 if __name__ == "__main__":
+    # rpa_daily_target_portfolio_performance()
     for _ in range(10):
         try:
-            rpa_daily_performance(LAST_TRADE_DT)
-            rpa_daily_target_portfolio_performance()
-            wx_robot = WxWrapper()
-            mention_moble_list = wx_robot.get_mentioned_moble_list_by_name(
-                ["陈娇君", "陆天琦", "陈恺寅"]
-            )
-            wx_robot.send_image(
-                image_path="E:/基金投顾自动化/结果/目标盈日度监控.png",
-            )
-            wx_robot.send_image(
-                image_path="E:/基金投顾自动化/结果/策略业绩日报v7.png",
-            )
-            wx_robot.send_text(
-                content="#每日播报 仅供各位领导同事内部参考，请勿对客转发",
-            )
-            wx_robot.send_text(
-                content=f"{emoji.emojize('❣')}今日基金投顾业绩播报与目标盈播报已送达,请注意查收{emoji.emojize('❣')}",
-                mentioned_mobile_list=mention_moble_list,
-            )
+            main()
             break
         except Exception as e:
             print(e)

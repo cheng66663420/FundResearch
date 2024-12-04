@@ -1,13 +1,12 @@
 import feather
+import polars as pl
 from fund_db_updates import update_derivatives_db
 from fund_db_updates_jy import update_jy_db
 from fund_db_updates_new import update_derivatives_jy
-from fund_db_updates_wind import update_wind_db
 
 import quant_utils.data_moudle as dm
 from quant_utils.constant import TODAY
 from quant_utils.db_conn import DB_CONN_JJTG_DATA
-import polars as pl
 
 
 def write_nav_into_ftr(date: str, file_path: str = "F:/data_ftr/fund_nav/") -> None:

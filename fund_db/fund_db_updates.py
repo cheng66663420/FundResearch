@@ -1302,7 +1302,7 @@ def update_derivatives_db(update_date: str = None):
 
 
 if __name__ == "__main__":
-    update_derivatives_db("20241127")
+    update_qt_tradingdaynew()
     # update_temperature_stock("20240417")
     # update_fund_derivatives_enhanced_index_performance()
     # update_fund_derivatives_enhanced_index_performance_rank()
