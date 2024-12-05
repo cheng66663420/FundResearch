@@ -15,6 +15,7 @@ from quant_pl.performance_pl import PerformancePL
 from quant_utils.constant_varialbles import LAST_TRADE_DT
 from quant_utils.db_conn import DB_CONN_JJTG_DATA, DB_CONN_JY_LOCAL, JJTG_URI
 from quant_utils.performance import Performance
+import glob
 
 INIT_DATE = "20210903"
 
@@ -24,8 +25,9 @@ def get_fund_nav_by_pl(
 ):
     start_date = parse(start_date)
     end_date = parse(end_date)
-    return (
-        pl.scan_parquet(f"{parquet_path}*.parquet")
+
+    lazy_df_list = [
+        pl.scan_parquet(x)
         .select(
             [
                 pl.col("END_DATE").cast(pl.Datetime),
@@ -34,10 +36,9 @@ def get_fund_nav_by_pl(
             ]
         )
         .filter((pl.col("END_DATE") >= start_date) & (pl.col("END_DATE") <= end_date))
-        .sort(
-            by=["END_DATE", "TICKER_SYMBOL"],
-        )
-    ).collect()
+        for x in glob.glob(f"{parquet_path}*.parquet")
+    ]
+    return pl.concat(lazy_df_list).sort(by=["END_DATE", "TICKER_SYMBOL"]).collect()
 
 
 def parallel_cal_performance(
@@ -220,7 +221,6 @@ def cal_needed_dates_df(end_date: str = None, start_date: str = None) -> pd.Data
         delayed(__helper_func)(constant_dates_df, date) for date in tqdm(trade_dts)
     )
     dates_df = pd.concat(dates_list)
-
     DB_CONN_JJTG_DATA.upsert(dates_df, table="portfolio_dates")
 
 
@@ -486,11 +486,10 @@ def update_fund_desc():
 
 
 def main():
-    today = datetime.datetime.now().strftime("%Y%m%d")
     start_date = dm.offset_trade_dt(LAST_TRADE_DT, 2)
     end_date = LAST_TRADE_DT
     date_list = dm.get_trade_cal(start_date, end_date)
-    cal_needed_dates_df(start_date=start_date, end_date=end_date)
+    # cal_needed_dates_df(start_date=start_date, end_date=end_date)
     update_performance_inner(start_date=start_date, end_date=end_date)
     for date in date_list:
         print(date)

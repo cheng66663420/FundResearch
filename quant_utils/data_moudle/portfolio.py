@@ -135,12 +135,8 @@ def get_portfolio_info() -> pd.DataFrame:
     order by order_id
     """
     df = DB_CONN_JJTG_DATA.exec_query(query_sql)
-    df["LISTED_DATE"] = df["LISTED_DATE"].apply(
-        lambda s: s.strftime("%Y%m%d") if s else ""
-    )
-    df["TO_CLIENT_DATE"] = df["TO_CLIENT_DATE"].apply(
-        lambda s: s.strftime("%Y%m%d") if s else ""
-    )
+    df["LISTED_DATE"] = df["LISTED_DATE"].dt.strftime("%Y%m%d")
+    df["TO_CLIENT_DATE"] = df["TO_CLIENT_DATE"].dt.strftime("%Y%m%d")
     return df
 
 

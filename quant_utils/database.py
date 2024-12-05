@@ -8,6 +8,8 @@ import pangres
 from sqlalchemy import create_engine, text, inspect, MetaData, Table
 from quant_utils import constant
 from sqlalchemy.dialects.mysql import insert
+import polars as pl
+from quant_utils.utils import display_time
 
 logging.basicConfig(
     filename=constant.LOG_FILE_PATH,
@@ -52,9 +54,7 @@ class MySQL:
         pd.DataFrame
             查询结果
         """
-        with self.engine.connect() as connection:
-            result = connection.execute(text(query))
-        return pd.DataFrame(result.fetchall(), columns=result.keys())
+        return pl.read_database_uri(query, self.uri).to_pandas()
 
     def exec_non_query(self, query: str) -> None:
         """
@@ -75,13 +75,12 @@ class MySQL:
         self, table: Table, df: pd.DataFrame, unique_constraint: list[str]
     ):
         insert_stmt = insert(table).values(df.to_dict(orient="records"))
-        return insert_stmt.on_duplicate_key_update(
-            {
-                col: insert_stmt.inserted[col]
-                for col in df.columns
-                if col not in unique_constraint
-            }
-        )
+        upsert_dict = {
+            col: insert_stmt.inserted[col]
+            for col in df.columns
+            if col not in unique_constraint
+        } or {col: insert_stmt.inserted[col] for col in df.columns}
+        return insert_stmt.on_duplicate_key_update(upsert_dict)
 
     def get_db_table_unque_index(self, table_name: str) -> list[list[str]]:
         # 创建数据库引擎
@@ -120,6 +119,7 @@ class MySQL:
             break
         return unique_constraint
 
+    @display_time()
     def upsert(
         self, df_to_upsert: pd.DataFrame, table: str, batch_size: int = 10000
     ) -> None:

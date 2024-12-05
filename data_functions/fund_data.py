@@ -961,7 +961,7 @@ def query_fund_performance_rank_pct(trade_dt: str = None):
 
 
 if __name__ == "__main__":
-    dates_list = dm.get_trade_cal("20230727", "20241203")
+    dates_list = dm.get_trade_cal("20231101", "20241203")
     for date in dates_list:
         print(date)
         df = cal_fund_performance_rank(date, if_pct=1)

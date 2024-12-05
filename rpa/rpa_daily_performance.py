@@ -236,7 +236,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # rpa_daily_target_portfolio_performance()
     for _ in range(10):
         try:
             main()

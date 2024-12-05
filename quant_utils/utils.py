@@ -4,6 +4,7 @@ Created on Thu Jun 16 21:51:11 2022
 
 @author: Wilcoxon
 """
+
 import datetime
 import json
 import os
@@ -510,7 +511,6 @@ def change_1min_to_day(df_1min: pd.DataFrame):
 
 
 def change_1min_to_other(df_1min: pd.DataFrame, N: str = "30min"):
-
     if (df_1min.shape[0] % 240) != 0:
         print(f"{df_1min.code[0]}分钟数据不满足240条记录")
         return None

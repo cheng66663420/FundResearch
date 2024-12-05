@@ -7,6 +7,7 @@ from fund_db_updates_new import update_derivatives_jy
 import quant_utils.data_moudle as dm
 from quant_utils.constant import TODAY
 from quant_utils.db_conn import DB_CONN_JJTG_DATA
+import pandas as pd
 
 
 def write_nav_into_ftr(date: str, file_path: str = "F:/data_ftr/fund_nav/") -> None:
@@ -28,6 +29,7 @@ def write_nav_into_ftr(date: str, file_path: str = "F:/data_ftr/fund_nav/") -> N
             AND END_DATE = '{date}'
     """
     nav_df = DB_CONN_JJTG_DATA.exec_query(query_sql)
+    nav_df["END_DATE"] = pd.to_datetime(nav_df["END_DATE"])
     if not nav_df.empty:
         feather.write_dataframe(nav_df, f"{file_path}{date}.ftr")
         nav_df.to_parquet(f"F:/data_parquet/fund_nav/{date}.parquet")

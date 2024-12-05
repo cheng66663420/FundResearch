@@ -234,31 +234,35 @@ if __name__ == "__main__":
         # df = cal_fund_4factors_alpha(trade_dt_1d)
         # DB_CONN_JJTG_DATA.upsert(df, "fund_derivatives_monitor")
         # logging.info(f"成功:fund_derivatives_monitor{today}")
-
-        query_sql = f"""
-        UPDATE fund_derivatives_fund_alpha a
-        INNER JOIN (
-            SELECT
-                a.trade_dt AS END_DATE,
-                a.ticker_symbol,
-                c.alpha_nav_barra * (1+ ifnull( a.alpha, 0 )) AS alpha_nav_barra,
-                c.alpha_nav_style * (1+ ifnull( d.alpha, 0 )) AS alpha_nav_style
-            FROM
-                fund_exposure_cne6_sw21 a
-                JOIN md_tradingdaynew b ON a.trade_dt = b.TRADE_DT
-                AND b.SECU_MARKET = 83
-                JOIN fund_derivatives_fund_alpha c ON c.END_DATE = b.PREV_TRADE_DATE
-                AND c.ticker_symbol = a.ticker_symbol
-                JOIN fund_style_stock d ON d.trade_dt = a.trade_dt
-                AND d.ticker_symbol = a.ticker_symbol
-            WHERE
-                a.trade_dt = '{trade_dt_1d}'
-            ) b ON a.END_DATE = b.END_DATE
-            AND a.TICKER_SYMBOL = b.TICKER_SYMBOL
-            SET a.ALPHA_NAV_BARRA = b.ALPHA_NAV_BARRA,
-            a.alpha_nav_style = b.alpha_nav_style;
-        """
-        DB_CONN_JJTG_DATA.exec_non_query(query_sql)
+        dt_list = dm.get_trade_cal(
+            start_date=trade_dt_2d,
+            end_date=trade_dt_1d,
+        )
+        for dt in dt_list:
+            query_sql = f"""
+            UPDATE fund_derivatives_fund_alpha a
+            INNER JOIN (
+                SELECT
+                    a.trade_dt AS END_DATE,
+                    a.ticker_symbol,
+                    c.alpha_nav_barra * (1+ ifnull( a.alpha, 0 )) AS alpha_nav_barra,
+                    c.alpha_nav_style * (1+ ifnull( d.alpha, 0 )) AS alpha_nav_style
+                FROM
+                    fund_exposure_cne6_sw21 a
+                    JOIN md_tradingdaynew b ON a.trade_dt = b.TRADE_DT
+                    AND b.SECU_MARKET = 83
+                    JOIN fund_derivatives_fund_alpha c ON c.END_DATE = b.PREV_TRADE_DATE
+                    AND c.ticker_symbol = a.ticker_symbol
+                    JOIN fund_style_stock d ON d.trade_dt = a.trade_dt
+                    AND d.ticker_symbol = a.ticker_symbol
+                WHERE
+                    a.trade_dt = '{dt}'
+                ) b ON a.END_DATE = b.END_DATE
+                AND a.TICKER_SYMBOL = b.TICKER_SYMBOL
+                SET a.ALPHA_NAV_BARRA = b.ALPHA_NAV_BARRA,
+                a.alpha_nav_style = b.alpha_nav_style;
+            """
+            DB_CONN_JJTG_DATA.exec_non_query(query_sql)
 
         df = cal_fund_inner_alpha_performance(
             start_date=trade_dt_2d, end_date=trade_dt_1d

@@ -656,7 +656,7 @@ def send_performance_mail(end_date):
 
 
 def main():
-    start_date = dm.offset_trade_dt(LAST_TRADE_DT, 3)
+    start_date = dm.offset_trade_dt(LAST_TRADE_DT, 2)
     end_date = LAST_TRADE_DT
     update_portfolio_performance(
         start_date=start_date,
